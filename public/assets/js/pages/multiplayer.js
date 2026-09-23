@@ -48,7 +48,7 @@ function cleanTracks(list, owner) {
 /* ---------------- the game ---------------- */
 const MP = {
   active: false, host: false, code: null, conns: new Set(), players: {}, libs: {}, myId: null,
-  state: 'idle', round: 0, total: 0, answers: {}, curQ: null, curLimit: 0, roundTimer: null, names: {}, lobby: null, myName: '', myHist: [],
+  mode: 'classic', state: 'idle', round: 0, total: 0, answers: {}, curQ: null, curLimit: 0, roundTimer: null, names: {}, lobby: null, myName: '', myHist: [],
   open(joinCode) {
     UI.show('mp');
     const name = this.myName || Me?.display_name || store.get('mpName', '') || '';
@@ -124,7 +124,7 @@ const MP = {
     }
   },
   lobbyChanged() {
-    const m = { t: 'lobby', code: this.code, players: this.pub(), hostName: this.players.host?.name, summary: settingsSummary(), state: this.state };
+    const m = { t: 'lobby', code: this.code, players: this.pub(), hostName: this.players.host?.name, summary: this.summary(), state: this.state };
     this.broadcast(m);
     if (this.state === 'lobby') this.renderLobby(); else this.renderBoard(this.pub());
   },
@@ -141,8 +141,8 @@ const MP = {
           <p class="mute" style="margin:0 0 6px">Game code</p>
           <div class="mp-code">${esc(code || '…')}</div>
           ${isHost ? `<p class="mute" style="margin-top:14px">Friends open this site and enter the code, or use this link:</p><div class="row"><code>${esc(link)}</code><button class="btn sm" data-act="mpCopy">Copy link</button></div>` : `<p class="mute" style="margin-top:14px">Waiting for ${esc(this.lobby?.hostName || 'the host')} to start the game.</p>`}
-          <hr><h3>Settings</h3><p class="mute">${esc(isHost ? settingsSummary() : (this.lobby?.summary || ''))}</p>
-          ${isHost ? `<div class="row"><button class="btn sm" data-act="mpSettings">Change settings</button>${Object.keys(PRESETS).filter(k => k !== 'survival' && k !== 'blitz').map(k => `<button class="btn sm ghost" data-act="mpPreset" data-k="${k}">${PRESETS[k].icon} ${esc(PRESETS[k].name)}</button>`).join('')}</div>` : ''}
+          <hr><h3>Game mode</h3><p class="mute">${esc(isHost ? this.summary() : (this.lobby?.summary || ''))}</p>
+          ${isHost ? `<div class="chips" style="margin-bottom:10px">${MP_MODES.map(k => `<button class="chip ${this.mode === k ? 'on' : ''}" data-act="mpPreset" data-k="${k}">${PRESETS[k].icon} ${esc(PRESETS[k].name)}</button>`).join('')}</div><button class="btn sm" data-act="mpSettings">${esc(PRESETS[this.mode].name)} settings</button>` : ''}
         </div>
         <div class="panel"><h2>Players</h2>
           ${players.map(p => `<div class="player"><span class="dot ${p.connected ? 'on' : ''}"></span><span class="n"><b>${esc(p.name)}</b>${p.id === this.myId ? ' <span class="mute">(you)</span>' : ''}<br><small class="mute">${p.count ? fmtN(p.count) + ' songs' : 'no songs shared'}</small></span>
@@ -151,8 +151,9 @@ const MP = {
         </div>
       </div>`;
   },
+  summary() { return `${PRESETS[this.mode].name}: ${settingsSummary({ ...modeSettings(this.mode), rule: 'classic' })}`; },
   startGame() {
-    if (S.rule !== 'classic') { S.rule = 'classic'; saveS(); }
+    applyMode(this.mode); S.rule = 'classic';   // multiplayer is always a set number of songs
     const merged = dedupe(Object.entries(this.libs).filter(([id]) => this.players[id]?.include && this.players[id]?.connected).flatMap(([, l]) => l));
     const pool = Lib.filtered(merged);
     if (pool.length < 4) return toast('Fewer than 4 songs in the mix after filters.');
@@ -343,8 +344,8 @@ Object.assign(Act, {
   mpLobby() { MP.backToLobby(); },
   mpCopy() { const link = SITE_DIR + 'join/' + MP.code; navigator.clipboard?.writeText(link).then(() => toast('Invite link copied.'), () => toast(link, 8000)); },
   mpInclude(el) { const p = MP.players[el.dataset.id]; if (p) { p.include = el.checked; MP.lobbyChanged(); } },
-  mpPreset(el) { S = presetSettings(el.dataset.k); S.rule = 'classic'; saveS(); MP.lobbyChanged(); toast(PRESETS[el.dataset.k].name + ' settings loaded.'); },
-  mpSettings() { SettingsUI.target = 'modal'; SettingsUI.mp = true; SettingsUI.onClose = () => { if (MP.host && MP.state === 'lobby') MP.lobbyChanged(); }; SettingsUI.render(); },
+  mpPreset(el) { if (!PRESETS[el.dataset.k]) return; MP.mode = el.dataset.k; MP.lobbyChanged(); },
+  mpSettings() { SettingsUI.open('modal', MP.mode, { mp: true, onClose: () => { if (MP.host && MP.state === 'lobby') MP.lobbyChanged(); } }); },
   quit() { Act.mpLeave(); }
 });
 document.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.matches('#mpCode, #mpName2')) Act.mpJoin(); });

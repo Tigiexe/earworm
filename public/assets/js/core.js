@@ -136,8 +136,15 @@ let S = deepMerge(JSON.parse(JSON.stringify(DEFAULTS)), store.get('settings', {}
 if (S.keepPlaying === false && S.afterAnswer === 'fade') S.afterAnswer = 'stop';
 delete S.keepPlaying; delete S.blendShare; delete S.filters.sources;   // older versions
 function saveS() { store.set('settings', S); applyAccent(); }
-function setPath(path, v) { const ks = path.split('.'); let o = S; while (ks.length > 1) o = o[ks.shift()]; o[ks[0]] = v; }
-function getPath(path) { return path.split('.').reduce((o, k) => o?.[k], S); }
+/* Settings that belong to a game mode: every mode (Classic, Heardle, Custom…) keeps its own copy (Modes in quiz.js).
+   Everything else in S applies to every game: audio, pacing, which songs, look. */
+const RULE_KEYS = ['rule', 'rounds', 'lives', 'blitzTime', 'timeLimit', 'types', 'answerFormat', 'numChoices', 'difficulty', 'requireArtist', 'hints', 'oddPreview',
+  'speedBonus', 'maxPts', 'minPts', 'fullWindow', 'decayEnd', 'streakBonus', 'wrongPenalty', 'clipStart', 'clipLength', 'coverStyle', 'coverAnswer', 'coverAudio', 'yearFormat', 'yearShowInfo'];
+/* what the settings controls change: S, or one mode's rules while that mode's panel is open */
+const Edit = { obj: null, save: null };
+function setPath(path, v) { const ks = path.split('.'); let o = Edit.obj || S; while (ks.length > 1) o = o[ks.shift()]; o[ks[0]] = v; }
+function getPath(path) { return path.split('.').reduce((o, k) => o?.[k], Edit.obj || S); }
+function saveEdit() { if (Edit.save) Edit.save(); else saveS(); }
 function applyAccent() {
   const c = /^#[0-9a-f]{6}$/i.test(S.accent) ? S.accent : '#ffb547';
   const r = parseInt(c.slice(1, 3), 16), g = parseInt(c.slice(3, 5), 16), b = parseInt(c.slice(5, 7), 16);
@@ -153,6 +160,7 @@ const Auth = {
   tok: store.get('token', null),
   hasScope(s) { return !!this.tok?.scope && this.tok.scope.split(' ').includes(s); },
   async login(returnTo) {
+    if (!window.isSecureContext || !crypto.subtle) throw new Error('Spotify login only works over https:// (or http://127.0.0.1 on the computer running Earworm). Open the site through its domain.');
     const verifier = randStr(64), state = randStr(16);
     localStorage.setItem('ew_pkce', JSON.stringify({ verifier, state, returnTo: returnTo || location.href }));
     const p = new URLSearchParams({ response_type: 'code', client_id: clientId(), scope: SCOPES.join(' '), redirect_uri: REDIRECT_URI, code_challenge_method: 'S256', code_challenge: await pkceChallenge(verifier), state });

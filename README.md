@@ -47,3 +47,8 @@ Old `*.html` addresses redirect to these.
 - **Balance** (Settings → Which songs): *Even* gives each switched-on source the same share of questions; *By number of songs* picks from everything evenly.
 - A song never repeats within a game until every song has been used. Songs from your last few games are kept out while there are others (toggle and number of games in Settings). A small song list still works — it just repeats sooner.
 - Before a song is used, the server checks its preview file really loads. If a song still fails to play, the game drops it and picks another without using up a round.
+
+## Settings
+
+- **Settings page:** things that apply to every game — pace (break before each song, auto-advance), audio and volume, which songs are used, colours.
+- **Each game mode** (Classic, Heardle, … and **Custom game**) keeps its own rules: songs per game, time per song, answer style, points, clips. Change them on the mode's start screen (or with "… settings" in the multiplayer lobby); only that mode changes, and "Reset to default" undoes it. Custom game is the only mode where you choose the question types and game type.

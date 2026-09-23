@@ -1,25 +1,30 @@
 'use strict';
 /* Single-player game page: /game?mode=<preset key | custom> */
-const MODE = new URLSearchParams(location.search).get('mode') || 'custom';
+const MODE_ARG = new URLSearchParams(location.search).get('mode');
+const MODE = PRESETS[MODE_ARG] ? MODE_ARG : 'custom';
 const Game = {
-  st: null, pre: null, savedS: null,
+  st: null, pre: null,
   intro() {
     Header.render('play'); Player.initSDK(); Player.badge();
-    const p = PRESETS[MODE], s = MODE === 'custom' ? S : presetSettings(MODE);
+    const p = PRESETS[MODE];
     const pool = Lib.filtered();
-    $('#qArea').innerHTML = `<div class="intro"><div class="intro-ic">${p ? p.icon : '🎛️'}</div><h1>${esc(p ? p.name : 'Custom game')}</h1>
-      <p class="mute">${esc(p ? p.desc : '')}</p><p>${esc(settingsSummary(s))}</p>
+    $('#qArea').innerHTML = `<div class="intro"><div class="intro-ic">${p.icon}</div><h1>${esc(p.name)}</h1>
+      <p class="mute">${esc(p.desc)}</p><p id="modeSum">${esc(settingsSummary(modeSettings(MODE)))}</p>
       <p class="mute"><small>${fmtN(pool.length)} songs in the mix. Audio: ${Player.mode() === 'sdk' ? 'full songs' : '30-second previews'}.</small></p>
       <div class="row" style="justify-content:center"><button class="btn primary big" id="startBtn">Start</button><a class="btn ghost" href="/play">Back</a></div>
-      <p class="mute"><small>Keys: 1–6 pick an answer, R replays the clip, Enter goes to the next song.</small></p></div>`;
+      <p class="mute"><small>Keys: 1–6 pick an answer, R replays the clip, Enter goes to the next song.</small></p>
+      <details class="mode-set" ${MODE === 'custom' ? 'open' : ''}><summary>${esc(p.name)} settings</summary>
+        <p class="mute"><small>Only for ${esc(p.name)}. Volume, pacing and which songs are used are in <a href="/settings">Settings</a>.</small></p>
+        <div id="modeBox" class="settings-page"></div></details></div>`;
+    SettingsUI.open($('#modeBox'), MODE, { onChange: () => { const m = $('#modeSum'); if (m) m.textContent = settingsSummary(modeSettings(MODE)); } });
     const b = $('#startBtn'); b.focus(); b.onclick = () => this.start();
   },
   async start() {
-    this.savedS = S; S = MODE === 'custom' ? JSON.parse(JSON.stringify(S)) : presetSettings(MODE);
+    SettingsUI.close(); applyMode(MODE);
     const pool = Lib.filtered();
-    if (pool.length < 4) { S = this.savedS; toast(Lib.all().length < 4 ? 'Load some songs on the Play page first.' : `Only ${pool.length} songs match your filters. Loosen them in Settings.`); return; }
+    if (pool.length < 4) { toast(Lib.all().length < 4 ? 'Load some songs on the Play page first.' : `Only ${pool.length} songs match your filters. Loosen them in Settings.`); return; }
     const types = Engine.setup(pool);
-    if (!types.length) { S = this.savedS; toast('None of the selected question types work with these songs. Try Song title or Artist.'); return; }
+    if (!types.length) { toast('None of the selected question types work with these songs. Try Song title or Artist.'); return; }
     if (Engine.skipped.length) toast('Skipped ' + Engine.skipped.map(k => TYPES[k].name).join(', ') + ' — not enough song data for it.');
     Player.unlock();
     this.st = { key: MODE, rule: S.rule, round: 0, score: 0, streak: 0, best: 0, lives: S.rule === 'survival' ? S.lives : null, hist: [], correct: 0, total: S.rule === 'classic' ? S.rounds : null, blitzEnd: null };
@@ -67,7 +72,7 @@ const Game = {
     floatPts(pts); this.hud();
     QUI.markReveal(res);
     if (q.track && (q.audio || q.type === 'cover')) Player.afterAnswer(q.track, QUI.ctx?.startSec); else Player.fadeOut(300);
-    Reveal.show({ q, res, pts, last: this.over(), onNext: () => this.next() });
+    Reveal.show({ q, res, pts, last: this.over(), onNext: () => this.next(), auto: st.rule === 'blitz' ? 1 : S.autoAdvance });
   },
   hud() {
     const st = this.st; if (!st) return;
@@ -81,7 +86,6 @@ const Game = {
     this.st = null; this.pre = null; QUI.abort(); Reveal.clear(); Player.fadeOut(600);
     const name = PRESETS[st.key]?.name || 'Custom game';
     const newBest = Stats.record({ key: st.key, name, score: st.score, bestStreak: st.best }, st.hist);
-    if (this.savedS) { S = this.savedS; this.savedS = null; }
     if (!st.hist.length) return go('play');
     session.set('lastGame', { key: st.key, name, score: st.score, correct: st.correct, best: st.best, newBest, hist: st.hist.map(h => ({ q: { type: h.q.type, answer: h.q.answer, kind: h.q.kind, track: h.q.track }, res: { correct: h.res.correct, factor: h.res.factor, given: h.res.given, elapsed: h.res.elapsed }, pts: h.pts })) });
     setTimeout(() => go('results'), 250);

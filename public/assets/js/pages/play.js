@@ -64,8 +64,8 @@ const Home = {
         <div class="panel">${mix}${spotify}${charts}${blend}${genres}</div>
         <div>
           <div class="modes">
-            ${Object.entries(PRESETS).map(([k, p]) => `<a class="mode ${n < 4 ? 'off' : ''}" href="${n < 4 ? '#' : `/game?mode=${k}`}" ${n < 4 ? 'data-act="needSongs"' : ''}><span class="ic">${p.icon}</span><b>${esc(p.name)}</b><span class="d">${esc(p.desc)}</span>${best[k] ? `<span class="best num">Best ${fmtN(best[k])}</span>` : ''}</a>`).join('')}
-            <a class="mode feature" href="/settings"><span class="ic">🎛️</span><span><b>Custom game</b><span class="d">${esc(settingsSummary())}${best.custom ? ` Best ${fmtN(best.custom)}.` : ''}</span></span></a>
+            ${Object.entries(PRESETS).filter(([k]) => k !== 'custom').map(([k, p]) => `<a class="mode ${n < 4 ? 'off' : ''}" href="${n < 4 ? '#' : `/game?mode=${k}`}" ${n < 4 ? 'data-act="needSongs"' : ''}><span class="ic">${p.icon}</span><b>${esc(p.name)}</b><span class="d">${esc(p.desc)}</span>${best[k] ? `<span class="best num">Best ${fmtN(best[k])}</span>` : ''}</a>`).join('')}
+            <a class="mode feature" href="/game?mode=custom"><span class="ic">🎛️</span><span><b>Custom game</b><span class="d">Your own rules. ${esc(settingsSummary(modeSettings('custom')))}${best.custom ? ` Best ${fmtN(best.custom)}.` : ''}</span></span></a>
           </div>
           <div class="panel" style="margin-top:22px">
             <div class="row" style="justify-content:space-between;align-items:baseline"><h2 style="margin:0">Your stats</h2><a href="/stats">See all</a></div>

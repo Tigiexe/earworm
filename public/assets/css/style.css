@@ -398,3 +398,14 @@ a.mode.feature{display:flex}
 .vol-ic:hover{background:var(--card2)}
 .vol input{width:96px;accent-color:var(--acc);cursor:pointer}
 @media (max-width:520px){.vol input{width:64px}.vol{padding-right:8px}}
+
+/* a mode's own settings on its start screen */
+.mode-set{max-width:760px;margin:28px auto 0;text-align:left;background:var(--bg2);border:1px solid var(--line);border-radius:var(--r1);padding:4px 22px 14px}
+.mode-set summary{cursor:pointer;font-weight:700;font-size:17px;padding:14px 0 10px;list-style:none}
+.mode-set summary::-webkit-details-marker{display:none}
+.mode-set summary::before{content:'⚙ ';color:var(--acc)}
+.mode-set summary::after{content:' ▾';color:var(--mute)}
+.mode-set[open] summary::after{content:' ▴'}
+.mode-set[open] summary{border-bottom:1px solid var(--line);margin-bottom:10px}
+.mode-set .settings-page .set-sec:first-child{padding-top:0}
+.intro .mode-set p{margin-left:0}

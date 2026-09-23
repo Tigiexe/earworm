@@ -124,8 +124,7 @@ const QUI = {
     return `<div class="choices ${q.tf ? 'tf' : ''}">${q.choices.map((c, i) => `<button class="choice" data-i="${i}">${q.tf ? '' : `<kbd>${i + 1}</kbd>`}<span>${esc(c)}</span></button>`).join('')}</div>`;
   },
   textHTML(q) {
-    const ph = { title: 'Artist – Song, e.g. System of a Down – Aerials', artist: 'Type the artist', album: 'Artist – Album, or just the album' }[q.suggest] || 'Type your answer';
-    return `<div class="text-ans" id="textAns"><div class="hint hidden" id="hintTxt"></div><div class="ac"><input class="field" id="qInput" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="${esc(ph)}"><div class="ac-list" id="acList"></div></div>
+    return `<div class="text-ans" id="textAns"><div class="hint hidden" id="hintTxt"></div><div class="ac"><input class="field" id="qInput" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Your answer"><div class="ac-list" id="acList"></div></div>
       <div class="ac-msg" id="acMsg"></div>
       <div class="row"><button class="btn primary" data-q="submit">Guess</button><button class="btn ghost" data-q="giveup">${q.type === 'heardle' ? 'Give up' : 'I don’t know'}</button></div></div>`;
   },
@@ -404,7 +403,7 @@ const Reveal = {
   clear() { clearInterval(this.timer); this.onNext = null; document.removeEventListener('keydown', this.onKey); const b = $('#revealBox'); if (b) b.innerHTML = ''; },
   onKey: e => { if (e.key === 'Enter' && !e.target.matches('input,textarea,select,button') && Reveal.onNext) { e.preventDefault(); Reveal.go(); } },
   go() { const f = this.onNext; this.clear(); f && f(); },
-  show({ q, res, pts, last, onNext, extraHTML = '', nextLabel, waiting }) {
+  show({ q, res, pts, last, onNext, extraHTML = '', nextLabel, waiting, auto = S.autoAdvance }) {
     clearInterval(this.timer);
     const v = verdict(q, res);
     const ptsTxt = pts > 0 ? `+${pts}` : pts < 0 ? `${pts}` : '0';
@@ -416,8 +415,8 @@ const Reveal = {
     const nb = $('#revealBox [data-next]'); if (nb) nb.onclick = () => this.go();
     if (onNext) {
       document.addEventListener('keydown', this.onKey);
-      if (S.autoAdvance > 0 && !last) {
-        let n = S.autoAdvance; const lab = $('#autoNext'); lab.innerHTML = `Next in ${n}s <button class="linkbtn" id="holdNext">wait</button>`;
+      if (auto > 0 && !last) {
+        let n = auto; const lab = $('#autoNext'); lab.innerHTML = `Next in ${n}s <button class="linkbtn" id="holdNext">wait</button>`;
         $('#holdNext').onclick = () => { clearInterval(this.timer); lab.textContent = ''; };
         this.timer = setInterval(() => { n--; if (n <= 0) { clearInterval(this.timer); this.go(); } else { const s = lab.firstChild; if (s) s.textContent = `Next in ${n}s `; } }, 1000);
       }
@@ -433,24 +432,49 @@ function floatPts(pts) {
 }
 const streakTxt = n => n >= 3 ? `${n} in a row` + (S.streakBonus ? ` ×${Score.streak(n)}` : '') : '';
 
-/* ---------------- presets ---------------- */
+/* ---------------- game modes ---------------- */
 const PRESETS = {
   classic:  { name: 'Classic',       icon: '🎧', desc: 'Name the song or the artist, four options each', set: { rule: 'classic', rounds: 10, answerFormat: 'choice', types: { title: 1, artist: 1 } } },
   heardle:  { name: 'Heardle',       icon: '⏱️', desc: 'Start with one second of audio and earn more by skipping', set: { rule: 'classic', rounds: 8, answerFormat: 'text', types: { heardle: 1 } } },
   cover:    { name: 'Cover reveal',  icon: '🖼️', desc: 'Guess the album from artwork that sharpens over time', set: { rule: 'classic', rounds: 10, types: { cover: 1 } } },
   years:    { name: 'Time machine',  icon: '📅', desc: 'Release years and which-came-first', set: { rule: 'classic', rounds: 10, types: { year: 1, first: 1 } } },
-  typeit:   { name: 'Type it',       icon: '⌨️', desc: 'No options — type “Artist – Song” from the whole catalog', set: { rule: 'classic', rounds: 10, answerFormat: 'text', types: { title: 1, artist: 1, album: 1 } } },
+  typeit:   { name: 'Type it',       icon: '⌨️', desc: 'No options — type the answer, with suggestions from the whole catalog', set: { rule: 'classic', rounds: 10, answerFormat: 'text', types: { title: 1, artist: 1, album: 1 } } },
   deep:     { name: 'Deep cuts',     icon: '🔍', desc: 'Wrong options come from the same album or artist', set: { rule: 'classic', rounds: 10, answerFormat: 'choice', difficulty: 'album', types: { title: 1, album: 1 } } },
   survival: { name: 'Survival',      icon: '❤️', desc: 'Three lives, keep going until you run out', set: { rule: 'survival', lives: 3, types: { title: 1, artist: 1, album: 1, truefalse: 1 } } },
-  blitz:    { name: 'Blitz',         icon: '⚡', desc: 'Sixty seconds, as many as you can', set: { rule: 'blitz', blitzTime: 60, timeLimit: 8, autoAdvance: 1, types: { title: 1, artist: 1, truefalse: 1 } } },
-  chaos:    { name: 'Chaos',         icon: '🌀', desc: 'Every question type, mixed answer formats', set: { rule: 'classic', rounds: 15, answerFormat: 'mixed', types: Object.fromEntries(Object.keys(TYPES).map(k => [k, 1])) } }
+  blitz:    { name: 'Blitz',         icon: '⚡', desc: 'Sixty seconds, as many as you can', set: { rule: 'blitz', blitzTime: 60, timeLimit: 8, types: { title: 1, artist: 1, truefalse: 1 } } },
+  chaos:    { name: 'Chaos',         icon: '🌀', desc: 'Every question type, mixed answer formats', set: { rule: 'classic', rounds: 15, answerFormat: 'mixed', types: Object.fromEntries(Object.keys(TYPES).map(k => [k, 1])) } },
+  custom:   { name: 'Custom game',   icon: '🎛️', desc: 'Your own rules: question types, game type, points and more', set: {} }
 };
-function presetSettings(key) {
-  const p = PRESETS[key], s = JSON.parse(JSON.stringify(S)); if (!p) return s;
-  for (const [k, v] of Object.entries(p.set)) if (k !== 'types') s[k] = v;
-  if (p.set.types) s.types = Object.fromEntries(Object.keys(TYPES).map(k => [k, !!p.set.types[k]]));
-  return s;
-}
+const MP_MODES = Object.keys(PRESETS).filter(k => k !== 'survival' && k !== 'blitz');   // multiplayer is always a set number of songs
+const clone = o => JSON.parse(JSON.stringify(o));
+const pickRules = o => clone(Object.fromEntries(RULE_KEYS.filter(k => k in o).map(k => [k, o[k]])));
+/* each mode's rules = defaults, then the mode's own, then your changes to that mode (saved per mode) */
+const Modes = {
+  saved: null,
+  load() {
+    if (this.saved) return this.saved;
+    this.saved = store.get('modes', null);
+    if (!this.saved) {   // first run after the update: your old settings become your Custom game
+      this.saved = {}; const old = store.get('settings', null);
+      if (old && old.types) this.saved.custom = pickRules(old);
+      store.set('modes', this.saved);
+    }
+    return this.saved;
+  },
+  defaults(key) {
+    const r = pickRules(DEFAULTS), set = PRESETS[key]?.set || {};
+    for (const [k, v] of Object.entries(set)) if (k !== 'types') r[k] = v;
+    if (set.types) r.types = Object.fromEntries(Object.keys(TYPES).map(k => [k, !!set.types[k]]));
+    return r;
+  },
+  rules(key) { return deepMerge(this.defaults(key), clone(this.load()[key] || {})); },
+  save(key, rules) { this.load()[key] = pickRules(rules); store.set('modes', this.saved); },
+  reset(key) { delete this.load()[key]; store.set('modes', this.saved); },
+  changed(key) { return !!this.load()[key]; }
+};
+/* the full settings a game of this mode runs with */
+function modeSettings(key) { return Object.assign(clone(S), Modes.rules(key)); }
+function applyMode(key) { Object.assign(S, Modes.rules(key)); }
 function settingsSummary(s = S) {
   const types = Object.keys(TYPES).filter(k => s.types[k]).map(k => TYPES[k].name);
   const fmt = { choice: 'multiple choice', text: 'type the answer', mixed: 'mixed answers' }[s.answerFormat];
