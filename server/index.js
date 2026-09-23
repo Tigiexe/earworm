@@ -46,7 +46,8 @@ function build() {
 build();
 
 /* ---------------- request helpers ---------------- */
-const isHttps = req => cfg.publicUrl.startsWith('https://') || (cfg.trustProxy && /^https/i.test(String(req.headers['x-forwarded-proto'] || '')));
+/* judge each request by how it actually arrived: a visit straight to http://<lan-ip>:port must not be told to upgrade to https */
+const isHttps = req => !!req.socket.encrypted || (cfg.trustProxy && /^https/i.test(String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim()));
 function clientIp(req) {
   if (cfg.trustProxy) {
     const xff = String(req.headers['x-forwarded-for'] || '').split(',').map(s => s.trim()).filter(Boolean);
@@ -74,7 +75,7 @@ function baseHeaders(req) {
 }
 function csp(req) {
   const secure = isHttps(req);
-  const host = cfg.publicUrl ? new URL(cfg.publicUrl).host : String(req.headers.host || '').replace(/[^\w.:[\]-]/g, '');
+  const host = String(req.headers.host || (cfg.publicUrl && new URL(cfg.publicUrl).host) || '').replace(/[^\w.:[\]-]/g, '');
   return [
     "default-src 'self'",
     "script-src 'self' https://sdk.scdn.co",
