@@ -1,0 +1,35 @@
+# systemd unit for Earworm. Installed by deploy/install.sh to /etc/systemd/system/earworm.service
+[Unit]
+Description=Earworm song quiz
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=earworm
+Group=earworm
+WorkingDirectory=/opt/earworm
+ExecStart=/usr/bin/env node server/index.js
+Environment=NODE_ENV=production
+Restart=on-failure
+RestartSec=3
+
+# hardening: the app only needs to read its own folder and talk to the network
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

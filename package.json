@@ -1,0 +1,18 @@
+{
+  "name": "earworm",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Earworm — a song guessing game built on Spotify and Deezer",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node server/index.js --dev",
+    "check": "node --check server/index.js && node scripts/check.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}
