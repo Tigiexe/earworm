@@ -47,7 +47,7 @@ const Game = {
     if (st.rule === 'blitz' && !st.blitzEnd) st.blitzEnd = performance.now() + S.blitzTime * 1000;
     this.hud();
     this.pre = Engine.nextPrepared(); this.pre.catch(() => {});
-    const res = await QUI.run(q, { limit: limitFor(q), names: Engine.names, roundLabel: st.round, globalEnd: st.blitzEnd, reroll: (this.rerolls || 0) < 3, onShown: x => Engine.shown(x), onTick: st.rule === 'blitz' ? () => this.tickBlitz() : null });
+    const res = await QUI.run(q, { limit: limitFor(q), names: Engine.names, roundLabel: st.round, globalEnd: st.blitzEnd, pause: st.rule === 'blitz' ? 0 : S.readyPause, reroll: (this.rerolls || 0) < 3, onShown: x => Engine.shown(x), onTick: st.rule === 'blitz' ? () => this.tickBlitz() : null });
     if (st !== this.st) return;
     if (res.unplayable) { this.rerolls = (this.rerolls || 0) + 1; Engine.markBad(q.track); st.round--; toast('That song wouldn’t play — here’s another.', 2500); return this.next(); }
     this.rerolls = 0;   // after 3 broken songs in a row, stop swapping (something bigger is wrong) and just show the question

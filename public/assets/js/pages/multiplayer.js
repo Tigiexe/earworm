@@ -192,7 +192,7 @@ const MP = {
   async playLocal(q, limit, round) {
     this.hud(round);
     Reveal.clear();
-    const res = await QUI.run(q, { limit, names: this.names, roundLabel: round, reroll: this.host && (this.rerolls || 0) < 3, onShown: this.host ? x => Engine.shown(x) : null });
+    const res = await QUI.run(q, { limit, names: this.names, roundLabel: round, pause: S.readyPause, reroll: this.host && (this.rerolls || 0) < 3, onShown: this.host ? x => Engine.shown(x) : null });
     if (!this.active || round !== this.round || q !== this.curQ) return;
     if (res.unplayable && this.host) { this.rerolls = (this.rerolls || 0) + 1; Engine.markBad(q.track); toast('That song wouldn’t play — picking another.', 2500); return this.hostNext(true); }
     this.rerolls = 0;

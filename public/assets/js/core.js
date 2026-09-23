@@ -115,7 +115,7 @@ const songLabel = t => `${t.artists?.[0]?.name || ''} – ${t.name}`;
 const DEFAULTS = {
   rule: 'classic', rounds: 10, lives: 3, blitzTime: 60, timeLimit: 15,
   types: { title: true, artist: true, album: false, year: false, cover: false, heardle: false, genre: false, truefalse: false, first: false, oddone: false },
-  answerFormat: 'choice', numChoices: 4, difficulty: 'normal', autocomplete: true, requireArtist: true, hints: true, autoAdvance: 5,
+  answerFormat: 'choice', numChoices: 4, difficulty: 'normal', autocomplete: true, requireArtist: true, hints: true, autoAdvance: 5, readyPause: 1,
   speedBonus: true, maxPts: 100, minPts: 50, fullWindow: 2, decayEnd: 10, streakBonus: true, wrongPenalty: 0,
   audioSource: 'auto', clipStart: 'random', clipLength: 0, volume: 0.7, afterAnswer: 'fade', sfx: true, oddPreview: false,
   coverStyle: 'pixelate', coverAnswer: 'album', coverAudio: false,
@@ -224,7 +224,8 @@ const SFX = {
   ctx: null,
   ensure() { if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)(); if (this.ctx.state === 'suspended') this.ctx.resume(); },
   tone(f, d, type = 'sine', v = 0.07, delay = 0) {
-    if (!S.sfx) return;
+    if (!S.sfx || S.volume <= 0) return;
+    v *= clamp(S.volume / 0.7, 0, 1.4);
     try { this.ensure(); const c = this.ctx, o = c.createOscillator(), g = c.createGain(), t = c.currentTime + delay; o.type = type; o.frequency.value = f; g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(0.0001, t + d); o.connect(g).connect(c.destination); o.start(t); o.stop(t + d + 0.02); } catch {}
   },
   ok() { this.tone(660, 0.12, 'triangle'); this.tone(990, 0.2, 'triangle', 0.07, 0.1); },
@@ -255,6 +256,7 @@ const Header = {
     h.innerHTML = `<a class="brand" href="${SITE_DIR}play"><span class="brand-disc"></span>Earworm</a>
       <nav class="nav">${links.map(([href, label, key]) => `<a href="${SITE_DIR}${href}" class="${active === key ? 'on' : ''}">${label}</a>`).join('')}</nav>
       <div class="top-r"><span id="audioBadge" class="badge hidden"></span>
+        <div class="vol"><button class="vol-ic" data-act="mute" aria-label="Mute or unmute" title="Mute / unmute">${volIcon(S.volume)}</button><input type="range" id="hdrVol" min="0" max="1" step="0.05" value="${S.volume}" aria-label="Volume" title="Volume"></div>
         <div class="menu"><button class="user" data-act="menu" aria-haspopup="true">${av}<span class="uname">${esc(Me?.display_name || 'Guest')}</span></button>
           <div class="menu-pop hidden" id="menuPop">
             <a href="${SITE_DIR}stats">Your stats</a>
@@ -268,12 +270,29 @@ document.addEventListener('click', e => {
 });
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && Modal.isOpen()) Modal.close(); });
 
+/* volume: the header slider, the Settings slider and the player all follow S.volume */
+const volIcon = v => v <= 0 ? '🔇' : v < 0.35 ? '🔈' : v < 0.7 ? '🔉' : '🔊';
+function setVolume(v, save = false) {
+  S.volume = clamp(+v || 0, 0, 1);
+  if (S.volume > 0) S.lastVolume = S.volume;
+  if (typeof Player !== 'undefined') Player.setVolume(S.volume);
+  for (const i of $$('#hdrVol, input[data-set="volume"]')) {
+    if (+i.value !== S.volume) i.value = S.volume;
+    const o = i.dataset.set && i.parentElement.querySelector('output'); if (o) o.textContent = Math.round(S.volume * 100) + '%';
+  }
+  const ic = $('.vol-ic'); if (ic) ic.textContent = volIcon(S.volume);
+  if (save) saveS();
+}
+document.addEventListener('input', e => { if (e.target.id === 'hdrVol') setVolume(e.target.value); });
+document.addEventListener('change', e => { if (e.target.id === 'hdrVol') setVolume(e.target.value, true); });
+
 /* shared click actions; pages add their own to Act */
 const Act = {
   menu() { $('#menuPop')?.classList.toggle('hidden'); },
   login() { if (!clientId()) return go(''); Auth.login().catch(e => toast(e.message)); },
   logout() { Auth.logout(); go(''); },
-  closeModal() { Modal.close(); }
+  closeModal() { Modal.close(); },
+  mute() { setVolume(S.volume > 0 ? 0 : (S.lastVolume || 0.7), true); }
 };
 document.addEventListener('click', e => {
   const el = e.target.closest('[data-act]'); if (!el || el.disabled) return;

@@ -38,6 +38,28 @@ function taskText(q) {
   }
   return ['', ''];
 }
+/* what the player has to name, with its own colour, so a switch from "song" to "artist" is hard to miss */
+const GUESS = {
+  song:   { label: 'Guess the song',   color: '#4de0e0' },
+  artist: { label: 'Guess the artist', color: '#ff5e8a' },
+  album:  { label: 'Guess the album',  color: '#c58bff' },
+  year:   { label: 'Guess the year',   color: '#ffe066' },
+  genre:  { label: 'Guess the genre',  color: '#6fe3a4' },
+  tf:     { label: 'True or false',    color: '#7aa7ff' },
+  odd:    { label: 'Odd one out',      color: '#ff8a4c' }
+};
+function guessOf(q) {
+  switch (q.type) {
+    case 'artist': return 'artist';
+    case 'album': return 'album';
+    case 'year': case 'first': return 'year';
+    case 'genre': return 'genre';
+    case 'truefalse': return 'tf';
+    case 'oddone': return 'odd';
+    case 'cover': return q.suggest === 'artist' ? 'artist' : q.suggest === 'title' ? 'song' : 'album';
+    default: return 'song';   // title, heardle
+  }
+}
 const HEARDLE_STAGES = [1, 2, 4, 7, 11, 16];
 const DIFFICULTIES = [['easy', 'Random'], ['normal', 'Similar'], ['hard', 'Very similar'], ['artist', 'Same artist'], ['album', 'Same album']];
 

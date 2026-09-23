@@ -365,3 +365,36 @@ a.mode.feature{display:flex}
 .set-btns .btn.icon{width:32px;padding:6px 0}
 .add-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:6px 0}
 .warn-t{color:var(--hot)}
+
+/* each kind of guess has its own colour (--q, set per question), so a change is easy to notice */
+.q-area{--q:var(--acc);position:relative}
+.q-kind{display:inline-flex;align-items:center;gap:7px;color:var(--q);font-weight:700;background:color-mix(in srgb,var(--q) 13%,transparent);border:1px solid color-mix(in srgb,var(--q) 45%,transparent);border-radius:999px;padding:3px 12px}
+.q-kind .mute{font-weight:600}
+.q-dot{width:9px;height:9px;border-radius:50%;background:var(--q);flex:none}
+.q-area .q-bar i{background:var(--q)}
+.q-area .ring .fg{stroke:var(--q)}
+.q-area .q-bar i.low{background:var(--hot)}
+.q-area .ring .fg.low{stroke:var(--hot)}
+.q-area .vinyl .label{background:var(--q);color:#1c1030}
+.q-area .task-t em{color:var(--q)}
+.q-area .task-ic{display:grid;place-items:center;width:1.7em;height:1.7em;border-radius:50%;background:color-mix(in srgb,var(--q) 18%,transparent);box-shadow:0 0 0 2px color-mix(in srgb,var(--q) 55%,transparent)}
+.q-area .choice:hover:not([disabled]){border-color:var(--q)}
+.q-area .choice.picked{border-color:var(--q);box-shadow:inset 0 0 0 1px var(--q)}
+.q-area .text-ans .field:focus{border-color:var(--q)}
+.q-area .hint{color:var(--q)}
+
+/* "up next" card shown for a moment before each clip */
+.q-ready{position:absolute;inset:-6px;z-index:6;display:flex;align-items:flex-start;justify-content:center;padding-top:min(18vh,150px);background:color-mix(in srgb,var(--bg) 90%,transparent);backdrop-filter:blur(4px);border-radius:var(--r1);animation:rise .2s ease-out;transition:opacity .25s}
+.q-ready.gone{opacity:0;pointer-events:none}
+.q-ready-in{text-align:center;padding:24px 34px 28px;border:2px solid var(--q);border-radius:var(--r1);background:var(--bg2);box-shadow:0 0 0 7px color-mix(in srgb,var(--q) 16%,transparent),0 20px 50px rgba(0,0,0,.45);max-width:92%}
+.q-ready-ic{font-size:46px;line-height:1;display:block;margin-bottom:8px}
+.q-ready-l{color:var(--mute);font-size:14px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px}
+.q-ready-t{font-size:clamp(26px,4.8vw,42px);font-weight:800;letter-spacing:-.02em;line-height:1.1}
+.q-ready-t em{font-style:normal;color:var(--q)}
+
+/* volume, always in the header */
+.vol{display:flex;align-items:center;gap:2px;background:var(--card);border:1px solid var(--line);border-radius:999px;padding:3px 12px 3px 3px}
+.vol-ic{background:none;border:0;cursor:pointer;font-size:16px;width:30px;height:30px;border-radius:50%;padding:0;line-height:1;display:grid;place-items:center}
+.vol-ic:hover{background:var(--card2)}
+.vol input{width:96px;accent-color:var(--acc);cursor:pointer}
+@media (max-width:520px){.vol input{width:64px}.vol{padding-right:8px}}

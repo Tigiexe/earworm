@@ -54,10 +54,19 @@ const QUI = {
         const l = $('#acList'); if (l) l.innerHTML = '';
         ctx.result = res; resolve(res);
       };
+      // opt.pause: seconds of "up next" before the clip and the timer start, so a new question never arrives unannounced
+      const pause = Math.max(0, +opt.pause || 0) * 1000;
+      ctx.waiting = pause > 0; ctx.locked = ctx.waiting;
       this.render(ctx);
       ctx.onKey = e => this.key(ctx, e);
       document.addEventListener('keydown', ctx.onKey);
-      this.begin(ctx);
+      if (!pause) this.begin(ctx);
+      else ctx.timers.push(setTimeout(() => {
+        if (ctx.done) return;
+        ctx.waiting = false; ctx.locked = false;
+        $('#qReady')?.classList.add('gone');
+        this.begin(ctx);
+      }, pause));
     });
   },
   abort() { const c = this.ctx; if (c && !c.done) c.finish({ aborted: true, timeout: true, correct: false, points: 0, factor: 0 }); },
@@ -73,12 +82,16 @@ const QUI = {
     let task = `<div class="task"><span class="task-ic" aria-hidden="true">${T.icon}</span><div><div class="task-t">${esc(lead)} ${key ? `<em>${esc(key)}</em>` : ''}</div><div class="task-s">${esc(T.name)}${ctx.opt.limit ? ` · ${ctx.opt.limit}s` : ''}</div></div></div>`;
     if (q.type === 'year' && q.info) task += `<div class="q-info">“${esc(q.track.name)}” by ${esc(q.track.artists[0]?.name)}</div>`;
     if (q.tf) task += `<div class="q-statement">${esc(q.statement)}</div>`;
+    const G = GUESS[guessOf(q)];
+    area.style.setProperty('--q', G.color);
+    const ready = ctx.waiting ? `<div class="q-ready" id="qReady" aria-live="polite"><div class="q-ready-in"><span class="q-ready-ic" aria-hidden="true">${T.icon}</span>
+      <div class="q-ready-l">${ctx.opt.roundLabel != null ? `Song ${esc(ctx.opt.roundLabel)} · ` : ''}up next</div><div class="q-ready-t">${esc(lead)} ${key ? `<em>${esc(key)}</em>` : ''}</div></div></div>` : '';
     area.innerHTML = `
-      <div class="q-head"><span class="q-kind">${T.icon} ${esc(T.name)}</span><span class="q-pts num" id="qPts"></span></div>
+      <div class="q-head"><span class="q-kind"><i class="q-dot"></i>${esc(G.label)}<span class="mute"> · ${esc(T.name)}</span></span><span class="q-pts num" id="qPts"></span></div>
       <div class="q-bar"><i id="qBar"></i></div>
       ${stage}${task}
       <div class="q-ans" id="qAns">${this.answersHTML(ctx)}</div>
-      <div class="q-tools" id="qTools">${this.toolsHTML(ctx)}</div>`;
+      <div class="q-tools" id="qTools">${this.toolsHTML(ctx)}</div>${ready}`;
     area.onclick = e => this.click(ctx, e);
     if (q.format === 'text') this.bindAC(ctx);
     if (q.format === 'slider') {
@@ -214,7 +227,7 @@ const QUI = {
     return Math.round(p * (ctx.hint ? 0.75 : 1));
   },
   click(ctx, e) {
-    const b = e.target.closest('[data-q],[data-i]'); if (!b || b.disabled) return;
+    const b = e.target.closest('[data-q],[data-i]'); if (!b || b.disabled || ctx.waiting) return;
     if (b.dataset.i != null) { if (ctx.q.type === 'heardle') return this.heardleGuess(ctx, +b.dataset.i); return this.answer(ctx, +b.dataset.i); }
     const a = b.dataset.q;
     if (a === 'submit') this.submitText(ctx);
@@ -235,7 +248,7 @@ const QUI = {
     else if (e.key === ' ' && q.type === 'heardle') { e.preventDefault(); this.playStage(ctx); }
   },
   async replay(ctx) {
-    const q = ctx.q; if (!q.audio) return;
+    const q = ctx.q; if (!q.audio || ctx.waiting) return;
     const r = await Player.play(q.track, { start: ctx.startSec, frac: q.startFrac, len: q.clipLength || 0, need: ctx.opt.limit || 15 });
     if (r.ok) { ctx.startSec = r.start; $('#vinyl')?.classList.add('spin'); }
   },

@@ -46,6 +46,7 @@ const SettingsUI = {
         ${item('Lives', rng('lives', 1, 10), S.rule === 'survival' && !mp)}
         ${item('Blitz length', rng('blitzTime', 30, 300, 15, 's'), S.rule === 'blitz' && !mp)}
         ${item('Time per song', rng('timeLimit', 5, 60, 1, 's'))}
+        ${item('Break before each song', rng('readyPause', 0, 3, 0.5, 'off0'), true, 'Shows what you’ll guess next before the clip and timer start (not in Blitz)')}
         <div style="margin-top:10px"><div class="types">${types}</div></div>
       </div>
       <div class="set-sec"><h3>Answers</h3>
@@ -110,7 +111,7 @@ document.addEventListener('input', e => {
   const el = e.target; if (!el.matches('input[type=range][data-set]')) return;
   setPath(el.dataset.set, +el.value);
   const o = el.parentElement.querySelector('output'); if (o) o.textContent = fmtRange(+el.value, el.dataset.unit);
-  if (el.dataset.set === 'volume') Player.setVolume(S.volume);
+  if (el.dataset.set === 'volume') setVolume(S.volume);
   SettingsUI.refreshCurve();
 });
 document.addEventListener('change', e => {
