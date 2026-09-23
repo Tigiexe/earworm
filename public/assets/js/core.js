@@ -154,7 +154,15 @@ function applyAccent() {
 applyAccent();
 
 /* ---------------- Spotify auth (PKCE) ---------------- */
-const clientId = () => CFG.CLIENT_ID || (CFG.ALLOW_CLIENT_ID_SETUP ? store.get('clientId', '') : '');
+/* Which Spotify app logins go through. Each Spotify app only lets its owner plus a few listed people log in,
+   so a friend can run their own app and share an invite link (/?app=<client id>) with their group.
+   A Client ID picked in this browser wins over the site's default one from .env. */
+const CID_RE = /^[0-9a-f]{32}$/i;
+const ownClientId = () => { const v = store.get('clientId', ''); return CID_RE.test(v) ? v : ''; };
+const clientId = () => ownClientId() || CFG.CLIENT_ID;
+const usingOwnApp = () => !!ownClientId() && ownClientId() !== CFG.CLIENT_ID;
+const shortId = id => id ? '…' + id.slice(-4) : '';
+const inviteLink = id => SITE_DIR + '?app=' + id;
 let Me = store.get('me', null);
 const Auth = {
   tok: store.get('token', null),
@@ -193,6 +201,8 @@ const Auth = {
     this.save(j);
   },
   /* forget the account and everything read from it, so the next person on this browser sees none of it */
+  /* sign out of Spotify but keep the songs already loaded (used when switching Spotify apps) */
+  forget() { this.tok = null; Me = null; store.del('token'); store.del('me'); },
   logout() {
     this.tok = null; Me = null; store.del('token'); store.del('me'); store.del('playlists'); store.del('genres'); store.del('likedNow');
     const sets = store.get('sets', []), personal = m => ['liked', 'top', 'pl', 'blend'].includes(m.kind);
@@ -221,11 +231,26 @@ async function loadMe() {
   if (!Auth.tok) return null;
   try { Me = await sp('/me'); store.set('me', Me); return Me; }
   catch (e) {
-    if (e.status === 403) toast('Spotify refused this account. The app owner needs to add your Spotify email under User Management in the developer dashboard.', 9000);
+    if (e.status === 403) toast(`Spotify refused this account. The owner of the Spotify app you log in through${usingOwnApp() ? ` (${shortId(clientId())})` : ''} needs to add your Spotify email under User Management.`, 10000);
     if (e.status === 403 || e.status === 400) Auth.logout();
     return null;
   }
 }
+
+/* ---------------- invite links: ?app=<client id> or ?app=default ---------------- */
+(function () {
+  const q = new URLSearchParams(location.search), app = q.get('app');
+  if (!app || app === 'choose') return;
+  const next = app === 'default' ? '' : CID_RE.test(app) ? app.toLowerCase() : null;
+  if (next === null) { setTimeout(() => toast('That invite link has a broken Spotify app ID. Ask for the link again.', 8000), 300); }
+  else if (next !== ownClientId()) {
+    const before = clientId();
+    if (next && next !== CFG.CLIENT_ID) store.set('clientId', next); else store.del('clientId');
+    if (Auth.tok && clientId() !== before) Auth.forget();   // the old login belongs to the other app
+    session.set('appSwitched', 1);
+  }
+  q.delete('app'); history.replaceState(null, '', location.pathname + (q.toString() ? '?' + q : '') + location.hash);
+})();
 
 /* ---------------- sound effects ---------------- */
 const SFX = {
@@ -268,6 +293,7 @@ const Header = {
         <div class="menu"><button class="user" data-act="menu" aria-haspopup="true">${av}<span class="uname">${esc(Me?.display_name || 'Guest')}</span></button>
           <div class="menu-pop hidden" id="menuPop">
             <a href="${SITE_DIR}stats">Your stats</a>
+            <a href="${SITE_DIR}?app=choose">Spotify app${usingOwnApp() ? ' (a friend’s)' : ''}</a>
             ${Auth.tok ? `<button data-act="logout">Log out</button>` : `<button data-act="login">Log in with Spotify</button>`}
           </div></div></div>`;
   }

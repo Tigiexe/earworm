@@ -12,6 +12,7 @@
   } catch (e) {
     main.innerHTML = `<div class="panel" style="max-width:620px;margin:40px auto"><h1 style="font-size:34px">Login didn’t finish</h1><p>${esc(e.message)}</p>
       <p class="mute">If Spotify said “redirect_uri: Not matching configuration”, add <code>${esc(REDIRECT_URI)}</code> to your app’s Redirect URIs and click Save.</p>
+      <p class="mute">If Spotify refused your account, the app’s owner hasn’t added your email yet — or <a href="/?app=choose">log in through a different Spotify app</a>.</p>
       <a class="btn primary" href="/">Try again</a></div>`;
   }
 })();

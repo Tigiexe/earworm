@@ -409,3 +409,7 @@ a.mode.feature{display:flex}
 .mode-set[open] summary{border-bottom:1px solid var(--line);margin-bottom:10px}
 .mode-set .settings-page .set-sec:first-child{padding-top:0}
 .intro .mode-set p{margin-left:0}
+
+/* login page notes */
+.app-note{font-size:15px;color:var(--mute);margin:14px 0 0;max-width:62ch}
+.ok-box{background:color-mix(in srgb,var(--ok) 14%,transparent);border:1px solid color-mix(in srgb,var(--ok) 45%,transparent);border-radius:var(--r2);padding:12px 16px;margin:0 0 18px;max-width:62ch}

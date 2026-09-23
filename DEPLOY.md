@@ -82,6 +82,13 @@ In <https://developer.spotify.com/dashboard> → your app → **Settings**:
 - **User Management:** add the Spotify email of everyone who will log in. Apps in development mode only accept listed accounts.
   Everyone else can still play the charts and join multiplayer games without logging in.
 
+### More people than one Spotify app allows
+
+Each Spotify app only lets its owner plus a few listed people log in. A friend with Premium can run a second app for their group:
+they open **Spotify app** in Earworm's profile menu (or `/?app=choose`), follow the steps there, and share the invite link it gives them
+(`https://yourdomain/?app=<their client id>`). Opening the link makes that browser log in through their app. The friend still adds each
+person's email under User Management in their own app — the link doesn't do that. `/?app=default` switches a browser back to your app.
+
 ## 5a. Make it public with Caddy (needs open ports)
 
 1. Point your domain's **A record** at your home's public IP (use your registrar's dynamic DNS, or a DDNS updater, if your IP changes).
