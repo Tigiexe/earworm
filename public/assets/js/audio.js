@@ -5,7 +5,18 @@ const Player = {
   el: new Audio(), sdk: null, deviceId: null, sdkReady: false, sdkFailed: false, transferred: false,
   cache: new Map(), pending: new Map(), token: 0, stopTimer: null, fadeTimer: null, current: null, usingSDK: false, playing: false,
   onChange: null,
-  wantSDK() { return S.audioSource !== 'preview' && !!Auth.tok && !this.sdkFailed; },
+  sdkErrors: 0,
+  wantSDK() { return S.audioSource !== 'preview' && !!Auth.tok && !this.sdkFailed && !this.sdkBrokenRecently(); },
+  /* if full songs kept failing on an earlier page, use previews for a while instead of starting silent again */
+  sdkBrokenRecently() { return Date.now() - (session.get('sdkBroken', 0) || 0) < 10 * 60_000; },
+  /* Spotify said it would play but nothing started: after two of those, switch this browser tab to previews */
+  sdkFailedOnce(e) {
+    console.warn('Spotify playback failed, using a preview instead', e);
+    if (++this.sdkErrors < 2 || this.sdkFailed) return;
+    this.sdkFailed = true; session.set('sdkBroken', Date.now()); this.badge();
+    toast('Full songs through Spotify aren’t starting, so Earworm switched to 30-second previews for the next 10 minutes.', 9000);
+    try { this.sdk?.disconnect(); } catch {}
+  },
   useSDK(t) { return this.wantSDK() && this.sdkReady && t && t.uri; },
   initSDK() {
     if (this._init || !this.wantSDK()) return; this._init = true;
@@ -17,13 +28,15 @@ const Player = {
       p.addListener('initialization_error', () => { this.sdkFailed = true; this.badge(); });
       p.addListener('authentication_error', () => { this.sdkFailed = true; this.badge(); });
       p.connect(); this.sdk = p;
+      // leaving the page: remove this player from Spotify, so the next page's player isn't fighting a dead one
+      addEventListener('pagehide', () => { try { p.pause().catch(() => {}); p.disconnect(); } catch {} });
     };
     const s = document.createElement('script'); s.src = 'https://sdk.scdn.co/spotify-player.js';
     s.onerror = () => { this.sdkFailed = true; this.badge(); };
     document.head.appendChild(s);
     setTimeout(() => { if (!this.sdkReady && !this.sdkFailed) { this.sdkFailed = true; this.badge(); } }, 12000);
   },
-  mode() { if (S.audioSource === 'preview' || !Auth.tok) return 'preview'; if (this.sdkReady) return 'sdk'; if (this.sdkFailed) return 'preview'; return 'connecting'; },
+  mode() { if (!this.wantSDK()) return 'preview'; if (this.sdkReady) return 'sdk'; return 'connecting'; },
   badge() {
     const b = $('#audioBadge'); if (!b) return;
     const m = this.mode(); b.classList.remove('hidden'); b.className = 'badge' + (m === 'sdk' ? ' good' : '');
@@ -79,8 +92,13 @@ const Player = {
         this.sdk.setVolume(S.volume).catch(() => {});
         await this.sdkPlay(t.uri, start * 1000, my);
         if (my !== this.token) return { ok: false, superseded: true };
+        this.sdkErrors = 0;
         this.schedStop(opts.len, my); return { ok: true, start };
-      } catch (e) { console.warn('SDK playback failed, trying preview', e); }
+      } catch (e) {
+        if (my !== this.token) return { ok: false, superseded: true };
+        this.sdk?.pause().catch(() => {});
+        this.sdkFailedOnce(e);
+      }
     }
     this.usingSDK = false;
     let url = null, offline = false;
@@ -119,8 +137,15 @@ const Player = {
     if (!this.transferred) { await transfer().catch(() => {}); this.transferred = true; await sleep(350); }
     try { await sp('/me/player/play?device_id=' + this.deviceId, { method: 'PUT', body }); }
     catch (e) { if (e.status === 404 || e.status === 502) { await transfer(); await sleep(700); await sp('/me/player/play?device_id=' + this.deviceId, { method: 'PUT', body }); } else throw e; }
+    // only count it as playing once the in-browser player really is (Spotify can accept the request and stay silent)
     const t0 = performance.now();
-    while (performance.now() - t0 < 4000 && my === this.token) { const st = await this.sdk.getCurrentState().catch(() => null); if (st && !st.paused && !st.loading) return; await sleep(100); }
+    while (performance.now() - t0 < 5000) {
+      if (my !== this.token) return;
+      const st = await this.sdk.getCurrentState().catch(() => null);
+      if (st && !st.paused && !st.loading) return;
+      await sleep(120);
+    }
+    throw new Error('Spotify accepted the song but the player in this page never started');
   },
   schedStop(len, my) { clearTimeout(this.stopTimer); if (len > 0) this.stopTimer = setTimeout(() => { if (my === this.token) this.pauseNow(); }, len * 1000); },
   pauseNow() {
