@@ -19,7 +19,7 @@ vm.runInContext(src + `
 const { Engine, Recent } = ctx.T, S = ctx.T.S();
 const song = (i, src = 'a', artist = 'Artist ' + (i % 40)) => ({ id: 'id' + i, name: 'Song ' + i, artists: [{ id: 'ar' + artist, name: artist }], album: { name: 'Album ' + i, year: 1990 + (i % 30), image: 'https://x/' + i }, src: [src] });
 let fails = 0; const ok = (c, msg) => { console.log((c ? 'ok   ' : 'FAIL ') + msg); if (!c) fails++; };
-S.types = { title: true }; S.avoidRecent = true; S.recentGames = 3; S.mixMode = 'even';
+S.types = { title: true }; S.avoidRecent = true; S.similar = 0; S.recentGames = 3; S.mixMode = 'even';
 
 // 1: no repeats inside a game
 let pool = Array.from({ length: 60 }, (_, i) => song(i));
@@ -45,7 +45,14 @@ let small = 0; for (let r = 0; r < 40; r++) { Engine.setup(mixed); for (let k = 
 ok(small > 120 && small < 280, `even mix: small source got ${small}/400 picks (expect ~200)`);
 S.mixMode = 'size'; small = 0; for (let r = 0; r < 40; r++) { Engine.setup(mixed); for (let k = 0; k < 10; k++) if (Engine.pickTrack().src[0] === 'small') small++; }
 ok(small < 25, `size mix: small source got ${small}/400 picks (expect ~4)`);
-// 7: preview expiry parsing
+// 7: multiplayer shares: 90 / 7 / 3
+const three = ['Ana', 'Bob', 'Cid'].flatMap((o, j) => Array.from({ length: 300 }, (_, i) => ({ ...song(5000 + j * 1000 + i, 'mp'), owners: [o] })));
+const got = { Ana: 0, Bob: 0, Cid: 0 };
+for (let r = 0; r < 40; r++) { Engine.setup(three, { groupBy: t => t.owners, weights: { Ana: 90, Bob: 7, Cid: 3 } }); for (let k = 0; k < 25; k++) got[Engine.pickTrack().owners[0]]++; }
+ok(got.Ana > 830 && got.Ana < 960 && got.Bob > 35 && got.Bob < 120 && got.Cid < 60, `shares 90/7/3 gave ${got.Ana}/${got.Bob}/${got.Cid} of 1000 picks`);
+Engine.setup(three, { groupBy: t => t.owners, weights: { Ana: 100, Bob: 0, Cid: 0 } });
+ok(Array.from({ length: 50 }, () => Engine.pickTrack().owners[0]).every(o => o === 'Ana'), 'a share of 0 leaves that player out');
+// 8: preview expiry parsing
 const P = ctx.T.Player, soon = Math.floor(Date.now() / 1000) + 30, later = soon + 3600;
 ok(!P.fresh('https://c/x.mp3?hdnea=exp=' + soon + '~acl') && P.fresh('https://c/x.mp3?hdnea=exp=' + later + '~acl') && P.fresh('https://itunes/x.m4a'), 'preview links are refreshed before they expire');
 process.exit(fails ? 1 : 0);

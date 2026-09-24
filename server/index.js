@@ -82,7 +82,7 @@ function csp(req) {
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src https://fonts.gstatic.com",
     "img-src 'self' data: blob: https:",
-    "media-src 'self' blob: https:",
+    "media-src 'self' blob: data: https:",   // data: is the silent clip that unlocks audio on phones
     `connect-src 'self' ${secure ? 'wss' : 'ws'}://${host} https://api.spotify.com https://accounts.spotify.com https://*.spotify.com`,
     'frame-src https://sdk.scdn.co https://*.spotify.com',
     "frame-ancestors 'none'", "base-uri 'none'", "form-action 'self'", "object-src 'none'",

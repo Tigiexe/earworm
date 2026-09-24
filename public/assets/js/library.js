@@ -79,7 +79,7 @@ function dedupe(list) {
 }
 function slimTrack(t) {
   if (!t) return t;
-  return { id: t.id, uri: t.uri, name: t.name, artists: t.artists, album: t.album, dur: t.dur, isrc: t.isrc, explicit: t.explicit, preview: t.preview, link: t.link, owners: t.owners, broad: t.broad, dz: t.dz, src: t.src };
+  return { id: t.id, uri: t.uri, name: t.name, artists: t.artists, album: t.album, dur: t.dur, isrc: t.isrc, explicit: t.explicit, preview: t.preview, link: t.link, owners: t.owners, broad: t.broad, dz: t.dz, src: t.src, similar: t.similar };
 }
 
 /* ---------------- Deezer (free, no login) — through our server ---------------- */
@@ -99,16 +99,44 @@ const Dz = {
     store.set('dzArtistIds', this.artistIds);
     return this.artistIds[k];
   },
-  async artistTop(id, n = 10) { if (!id) return []; const r = await this.cached(`top:${id}:${n}`, () => this.get(`artist/${id}/top`, { limit: n })); return (r.data || []).map(d => fromDeezer(d, 'blend')).filter(Boolean); },
+  async artistTop(id, n = 10) { if (!id) return []; const r = await this.cached(`top:${id}:${n}`, () => this.get(`artist/${id}/top`, { limit: n })); return (r.data || []).map(d => fromDeezer(d, 'similar')).filter(Boolean); },
   async related(id, n = 8) { if (!id) return []; const r = await this.cached(`rel:${id}`, () => this.get(`artist/${id}/related`, { limit: n })); return r.data || []; },
   async albums(id) { if (!id) return []; const r = await this.cached(`alb:${id}`, () => this.get(`artist/${id}/albums`, { limit: 60 })); return r.data || []; },
   async albumTracks(albumId) { if (!albumId) return []; const r = await this.cached(`at:${albumId}`, () => this.get(`album/${albumId}/tracks`, { limit: 100 })); return r.data || []; },
   async search(q, type = 'track', n = 8) { const r = await this.cached(`s:${type}:${q}:${n}`, () => this.get(type === 'all' ? 'search' : 'search/' + type, { limit: n, q })); return r.data || []; },
-  async chart(opts) { return (await api('/api/chart', opts)).data || []; }
+  async chart(opts) { return (await api('/api/chart', opts, { timeout: 30000, retries: 1 })).data || []; }   // a first load also fetches album years, ~10 s
 };
 const CHART_COUNTRIES = ['Worldwide', 'USA', 'UK', 'Canada', 'Australia', 'Germany', 'France', 'Italy', 'Spain', 'Netherlands', 'Belgium', 'Austria', 'Switzerland', 'Sweden', 'Norway', 'Denmark', 'Finland', 'Poland', 'Croatia', 'Serbia', 'Slovenia', 'Ireland', 'Portugal', 'Brazil', 'Mexico', 'Colombia', 'Argentina', 'Turkey', 'South Africa'];
 const DEEZER_GENRES = [[132, 'Pop', 'Pop'], [116, 'Rap & Hip-Hop', 'Hip-Hop & Rap'], [152, 'Rock', 'Rock'], [113, 'Dance', 'Electronic'], [106, 'Electro', 'Electronic'], [165, 'R&B', 'R&B & Soul'], [85, 'Alternative', 'Indie & Alternative'], [464, 'Metal', 'Metal'], [197, 'Latin', 'Latin'], [84, 'Country', 'Country & Folk'], [144, 'Reggae', 'Reggae & Afro'], [129, 'Jazz', 'Jazz & Blues'], [98, 'Classical', 'Classical & Soundtrack'], [173, 'Film & games', 'Classical & Soundtrack']];
 const TOP_RANGES = [['short_term', 'last 4 weeks'], ['medium_term', 'last 6 months'], ['long_term', 'past year']];
+
+/* ---------------- similar songs: relatives of a song, found on Deezer when a question asks for one ----------------
+   album: another song from the same album · artist: another song by the same artist · related: a song by a similar artist */
+const Similar = {
+  async albumId(t) {
+    if (t.dz?.album) return t.dz.album;
+    const a = t.artists[0]?.name || ''; if (!t.album.name) return null;
+    const r = await Dz.search(`artist:"${a}" album:"${cleanTitle(t.album.name)}"`, 'album', 5);
+    return r.find(x => sim(x.title, t.album.name) > 0.8 && nearEq(normArtist(x.artist?.name), normArtist(a)))?.id || null;
+  },
+  async candidates(t, kind) {
+    if (kind === 'album') {
+      const id = await this.albumId(t); if (!id) return [];
+      return (await Dz.albumTracks(id)).map(d => {
+        const x = fromDeezer(d, 'similar'); if (!x) return null;
+        x.album = { ...t.album, id: 'dzal' + id }; x.dz.album = id;   // album track lists leave out the album itself
+        return x;
+      }).filter(Boolean);
+    }
+    const aid = await Dz.artistId(t); if (!aid) return [];
+    if (kind === 'artist') return Dz.artistTop(aid, 25);
+    const me = normArtist(t.artists[0]?.name);
+    for (const a of shuffle((await Dz.related(aid, 12)).filter(a => normArtist(a.name) !== me)).slice(0, 3)) {
+      const top = await Dz.artistTop(a.id, 10); if (top.length) return top;
+    }
+    return [];
+  }
+};
 
 /* ---------------- catalog lookups for harder wrong options ---------------- */
 const Catalog = {
@@ -178,11 +206,13 @@ const Lib = {
   playlists: store.get('playlists', []),
   genres: store.get('genres', {}),       // Spotify artist id -> Spotify genre tags
   dzGenres: store.get('dzGenres', {}),   // artist name key -> Deezer genre ids
-  opts: Object.assign({ chart: CFG.DEFAULT_CHART, chartGenre: 0, blendArtist: true, blendSimilar: true, blendPer: 6, blendArtists: 30 }, store.get('libOpts', {})),
+  opts: Object.assign({ chart: CFG.DEFAULT_CHART, chartGenre: 0 }, store.get('libOpts', {})),
   _all: null,
   async init() {
     for (const k of ['lib', 'charts', 'blend', 'libSrc', 'dzChartIds']) store.del(k);   // caches from the old version
-    const sets = store.get('sets', []);
+    let sets = store.get('sets', []);
+    for (const m of sets.filter(m => m.kind === 'blend')) DB.del('set:' + m.key);   // similar songs are a game setting now, not a source
+    sets = sets.filter(m => m.kind !== 'blend');
     const lists = await Promise.all(sets.map(m => DB.get('set:' + m.key)));
     this.sets = []; this.data.clear();
     sets.forEach((m, i) => { if (Array.isArray(lists[i]) && lists[i].length) { this.sets.push(m); this.data.set(m.key, lists[i]); } });
@@ -259,35 +289,9 @@ const Lib = {
     const g = DEEZER_GENRES.find(x => x[0] === +genre);
     const data = await Dz.chart(g ? { genre: g[0] } : { country });
     const key = g ? 'chart:g' + g[0] : 'chart:' + country;
-    const tracks = data.map(d => fromDeezer(d, key, g ? { broad: [g[2]] } : {})).filter(Boolean);
+    // the server adds each album's release date and genre id; a genre chart already says its genre
+    const tracks = data.map(d => { const b = g ? g[2] : DZ_GENRES[d.album?.genre_id]?.[1]; return fromDeezer(d, key, b ? { broad: [b] } : {}); }).filter(Boolean);
     return this.putSet(key, 'chart', g ? `${g[1]} chart` : `Top ${country}`, tracks, g ? { genre: g[0] } : { country });
-  },
-
-  /* ---- similar songs, based on every other source that is switched on ---- */
-  async buildBlend(prog) {
-    const o = this.opts;
-    const base = dedupe(this.enabled().filter(m => m.kind !== 'blend').flatMap(m => this.data.get(m.key) || []));
-    if (!base.length) throw new Error('Switch on some songs first — similar songs are based on them.');
-    const have = new Set(base.map(trackKey));
-    const counts = new Map();
-    for (const t of base) { const a = t.artists[0]; if (!a) continue; const k = normArtist(a.name); const e = counts.get(k) || { n: 0, t }; e.n++; counts.set(k, e); }
-    const artists = [...counts.values()].sort((a, b) => b.n - a.n).slice(0, o.blendArtists).map(e => e.t);
-    const out = [], seenArtist = new Set(artists.map(t => normArtist(t.artists[0].name)));
-    const add = list => { for (const t of list) { const k = trackKey(t); if (!have.has(k)) { have.add(k); out.push(t); } } };
-    let done = 0;
-    await pool(artists, 3, async t => {
-      try {
-        const id = await Dz.artistId(t);
-        if (id && o.blendArtist) add((await Dz.artistTop(id, o.blendPer + 4)).filter(x => x.preview).slice(0, o.blendPer));
-        if (id && o.blendSimilar) {
-          const rel = (await Dz.related(id, 6)).filter(a => !seenArtist.has(normArtist(a.name))).slice(0, 2);
-          for (const a of rel) { seenArtist.add(normArtist(a.name)); add((await Dz.artistTop(a.id, 5)).filter(x => x.preview).slice(0, Math.max(2, Math.round(o.blendPer / 2)))); }
-        }
-      } catch (e) { console.warn('blend', e); }
-      done++; prog(`${done} of ${artists.length} artists`, done / artists.length);
-    });
-    await this.putSet('blend', 'blend', 'Similar songs', out, { artist: o.blendArtist, similar: o.blendSimilar, per: o.blendPer, artists: o.blendArtists });
-    return out.length;
   },
 
   /* reload a source with the options it was made with */
@@ -297,7 +301,6 @@ const Lib = {
     if (m.kind === 'top') return this.loadTop(m.opts.range || S.topRange, prog);
     if (m.kind === 'pl') { const pl = this.playlists.find(p => p.id === m.opts.id) || { id: m.opts.id, name: m.label }; return this.loadPlaylist(pl, prog); }
     if (m.kind === 'chart') return this.loadChart(m.opts);
-    if (m.kind === 'blend') return this.buildBlend(prog);
   },
   /* ---- genres: Spotify artist tags first, Deezer album genres for the rest. Both are kept in this browser
      (localStorage "genres" and "dzGenres"), so a scan only ever looks up artists it hasn't seen before. ---- */

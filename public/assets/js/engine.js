@@ -136,13 +136,14 @@ const Recent = {
 
 const Engine = {
   pool: [], groups: [], keys: new Map(), used: new Set(), bad: new Set(), lastArtists: [], types: [], skipped: [], names: {}, opts: {},
-  /* opts.groupBy(track) -> source keys used to balance the mix; opts.needPreview for multiplayer */
+  /* opts.groupBy(track) -> source keys used to balance the mix; opts.weights {key: share} (multiplayer shares);
+     opts.needPreview for multiplayer */
   setup(pool, opts = {}) {
     this.pool = pool; this.opts = opts; this.used = new Set(); this.bad = new Set(); this.lastArtists = [];
-    this.keys = new Map(pool.map(t => [t.id, trackKey(t)]));
+    this.keys = new Map(pool.map(t => [t.id, trackKey(t)])); this.poolKeys = new Set(this.keys.values());
     const by = opts.groupBy || (t => t.src || []), groups = new Map();
     for (const t of pool) for (const g of (by(t)?.length ? by(t) : ['?'])) { if (!groups.has(g)) groups.set(g, []); groups.get(g).push(t); }
-    this.groups = [...groups.values()];
+    this.groups = [...groups.entries()].map(([key, tracks]) => ({ key, tracks }));
     const want = Object.keys(TYPES).filter(k => S.types[k]);
     this.types = want.filter(k => feasible(k, pool));
     this.skipped = want.filter(k => !this.types.includes(k));
@@ -157,11 +158,18 @@ const Engine = {
   key(t) { return this.keys.get(t.id) || trackKey(t); },
   avail(t) { return !this.used.has(this.key(t)) && !this.bad.has(t.id); },
   take(t) { this.used.add(this.key(t)); this.lastArtists = [normArtist(t.artists[0]?.name), ...this.lastArtists].slice(0, 2); return t; },
-  /* one random song; in "even" mode every source (liked songs, a chart, a friend…) gets an equal chance first */
+  /* one random song. With weights (multiplayer shares) each group gets its share of the picks;
+     in "even" mode every source (liked songs, a chart…) gets an equal chance; in "size" mode every song does */
   pickFrom(ok) {
-    if (S.mixMode === 'size' || this.groups.length < 2) { const c = this.pool.filter(ok); return c.length ? pick(c) : null; }
-    for (const g of shuffle(this.groups)) { const c = g.filter(ok); if (c.length) return pick(c); }
-    return null;
+    const W = this.opts.weights;
+    if (!W && (S.mixMode === 'size' || this.groups.length < 2)) { const c = this.pool.filter(ok); return c.length ? pick(c) : null; }
+    const cands = this.groups.map(g => ({ w: W ? Math.max(0, W[g.key] || 0) : 1, c: g.tracks.filter(ok) })).filter(x => x.c.length);
+    if (!cands.length) return null;
+    const total = cands.reduce((a, x) => a + x.w, 0);
+    if (total <= 0) return pick(pick(cands).c);   // only zero-share groups have songs left
+    let r = Math.random() * total;
+    for (const x of cands) { r -= x.w; if (r <= 0 && x.w > 0) return pick(x.c); }
+    return pick(cands.filter(x => x.w > 0).pop().c);
   },
   /* Never repeats a song within a game until every song has been used. Prefers songs that weren't in your
      last few games (setting) and a different artist than the last two questions, relaxing those rules as needed. */
@@ -174,6 +182,40 @@ const Engine = {
     const rest = this.pool.filter(t => !this.bad.has(t.id) && pred(t)); if (!rest.length) return null;
     this.used.clear();   // every song has been played this game: start the cycle again
     return this.take(pick(rest));
+  },
+  /* a song for a question. Sometimes (mode setting "similar songs") it's swapped for a relative of the picked
+     song that isn't in your songs: from the same album, by the same artist, or by a similar artist */
+  async pickSong(pred = () => true) {
+    const t = this.pickTrack(pred); if (!t) return null;
+    if (!(S.similar > 0) || Math.random() >= S.similar) return t;
+    const x = await this.relative(t, pred).catch(e => { console.warn('similar', e); return null; });
+    if (!x) return t;
+    this.used.delete(this.key(t));   // the original wasn't asked about, so it stays available
+    return x;
+  },
+  async relative(t, pred) {
+    const mix = S.similarMix || {}, left = ['album', 'artist', 'related'].filter(k => (mix[k] || 0) > 0).map(k => [k, mix[k]]), order = [];
+    while (left.length) {   // weighted order: the preferred kind first, the others as fallbacks
+      let r = Math.random() * left.reduce((a, x) => a + x[1], 0), i = 0;
+      while (i < left.length - 1 && (r -= left[i][1]) > 0) i++;
+      order.push(left.splice(i, 1)[0][0]);
+    }
+    const games = S.avoidRecent ? S.recentGames : 0;
+    for (const kind of order) {
+      const cands = await Promise.race([Similar.candidates(t, kind), sleep(5000).then(() => [])]);
+      const ok = cands.filter(x => {
+        const k = trackKey(x);
+        return x.preview && k !== this.key(t) && !this.poolKeys.has(k) && !this.used.has(k) && !this.bad.has(x.id)
+          && (!games || !Recent.has(k, games)) && pred(x) && Lib.filtered([x]).length;
+      });
+      if (!ok.length) continue;
+      const x = pick(ok);
+      x.similar = { kind, of: t.name, ofArtist: t.artists[0]?.name || '' };
+      x.src = ['similar']; if (t.owners) x.owners = t.owners;
+      this.used.add(trackKey(x));
+      return x;
+    }
+    return null;
   },
   /* remember what a shown question used, so the next games can avoid it */
   shown(q) { for (const t of [q.track, ...(q.pair || []), ...(q.items || [])]) Recent.add(t); Recent.save(); },
@@ -218,16 +260,16 @@ async function makeQ(type) {
   let t;
   switch (type) {
     case 'title':
-      t = E.pickTrack(); if (!t) return null;
+      t = await E.pickSong(); if (!t) return null;
       q.track = slimTrack(t); q.suggest = 'title'; await withChoices('title', t.name, x => x.name, t); break;
     case 'artist':
-      t = E.pickTrack(x => x.artists.length); if (!t) return null;
+      t = await E.pickSong(x => x.artists.length); if (!t) return null;
       q.track = slimTrack(t); q.suggest = 'artist'; await withChoices('artist', t.artists[0].name, x => x.artists[0]?.name, t, t.artists.map(a => a.name)); break;
     case 'album':
-      t = E.pickTrack(x => x.album.name && normAns(x.album.name) !== normAns(x.name)) || E.pickTrack(x => x.album.name); if (!t) return null;
+      t = (await E.pickSong(x => x.album.name && normAns(x.album.name) !== normAns(x.name))) || (await E.pickSong(x => x.album.name)); if (!t) return null;
       q.track = slimTrack(t); q.suggest = 'album'; await withChoices('album', t.album.name, x => x.album.name, t); break;
     case 'year': {
-      t = E.pickTrack(x => x.album.year); if (!t) return null;
+      t = await E.pickSong(x => x.album.year); if (!t) return null;
       q.track = slimTrack(t); q.year = t.album.year; q.info = S.yearShowInfo;
       if (S.yearFormat === 'slider') {
         const ys = pool.map(x => x.album.year).filter(Boolean);
@@ -242,7 +284,7 @@ async function makeQ(type) {
       break;
     }
     case 'cover':
-      t = E.pickTrack(x => x.album.image); if (!t) return null;
+      t = await E.pickSong(x => x.album.image); if (!t) return null;
       q.track = slimTrack(t); q.audio = !!S.coverAudio;
       q.coverStyle = S.coverStyle === 'random' ? pick(['pixelate', 'blur', 'tiles', 'zoom']) : S.coverStyle;
       q.zoomOrigin = `${15 + rand(70)}% ${15 + rand(70)}%`;
@@ -251,12 +293,12 @@ async function makeQ(type) {
       else { q.suggest = 'album'; await withChoices('album', t.album.name, x => x.album.name, t); }
       break;
     case 'heardle':
-      t = E.pickTrack(); if (!t) return null;
+      t = await E.pickSong(); if (!t) return null;
       q.track = slimTrack(t); q.suggest = 'title'; q.stages = HEARDLE_STAGES;
       if (q.startFrac === -1) q.startFrac = 0.35;
       await withChoices('title', t.name, x => x.name, t); break;
     case 'genre': {
-      t = E.pickTrack(x => broadOf(x).size); if (!t) return null;
+      t = await E.pickSong(x => broadOf(x).size); if (!t) return null;
       q.track = slimTrack(t); const g = [...broadOf(t)]; const ans = pick(g);
       const present = new Set(pool.flatMap(x => [...broadOf(x)]));
       let others = shuffle(BROAD.map(b => b[0]).filter(n => !g.includes(n)));
@@ -265,7 +307,7 @@ async function makeQ(type) {
       break;
     }
     case 'truefalse': {
-      t = E.pickTrack(); if (!t) return null;
+      t = await E.pickSong(); if (!t) return null;
       q.track = slimTrack(t);
       const kinds = ['title', 'artist']; if (t.album.year) kinds.push('year');
       const kind = pick(kinds); let truth = Math.random() < 0.5, val;

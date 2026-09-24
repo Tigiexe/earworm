@@ -82,7 +82,30 @@ async function chart({ country, genre }) {
     if (!pl) throw httpError(404, `Deezer has no “Top ${country}” chart`);
     data = (await getJSON(`${DZ}playlist/${pl.id}/tracks?limit=100`, dzLimit, { ttl: 30 * MIN })).data;
   }
-  return { data: (data || []).filter(d => d && d.id && d.preview) };
+  data = (data || []).filter(d => d && d.id && d.preview);
+  await addAlbumInfo(data);
+  return { data };
+}
+/* Chart lists leave out each album's release date and genre, which year and genre questions need.
+   Fill them in from the albums (cached for a week), giving up on whatever isn't back within a few seconds. */
+async function addAlbumInfo(tracks) {
+  const ids = [...new Set(tracks.map(t => t.album?.id).filter(Boolean))];
+  const info = new Map();
+  const work = (async () => {
+    let i = 0;
+    await Promise.all(Array.from({ length: 4 }, async () => {
+      while (i < ids.length) {
+        const id = ids[i++];
+        try { const a = await getJSON(`${DZ}album/${id}`, dzLimit, { ttl: 7 * 24 * HOUR, tries: 1 }); info.set(id, a); } catch {}
+      }
+    }));
+  })();
+  await Promise.race([work, new Promise(r => setTimeout(r, 12_000))]);
+  for (const t of tracks) {
+    const a = info.get(t.album?.id); if (!a) continue;
+    if (a.release_date && !t.album.release_date) t.album.release_date = a.release_date;
+    if (a.genre_id > 0) t.album.genre_id = a.genre_id;
+  }
 }
 
 /* ---------------- previews ---------------- */

@@ -22,8 +22,8 @@ Object.assign(Act, {
 function trackCard(t, opts = {}) {
   if (!t) return '';
   const meta = [t.album.name, t.album.year].filter(Boolean).join(', ');
-  const owners = t.owners?.length ? `<div class="mute"><small>From ${esc(t.owners.join(' & '))}’s library</small></div>` : '';
-  const blend = (t.src || []).length === 1 && t.src[0] === 'blend' ? `<div class="mute"><small>Similar song, not from your library</small></div>` : '';
+  const owners = t.owners?.length && !t.similar ? `<div class="owner-note">${t.owners.map(o => `<span class="pchip" style="--pc:${playerColor(o)}">${esc(o)}</span>`).join('')}<small class="mute">’s songs</small></div>` : '';
+  const sm = t.similar, blend = sm ? `<div class="sim-note">✨ ${sm.kind === 'album' ? `Bonus song from the same album as “${esc(sm.of)}”` : sm.kind === 'artist' ? `Bonus song by ${esc(sm.ofArtist)}, like “${esc(sm.of)}”` : `Bonus: an artist similar to ${esc(sm.ofArtist)}`}${t.owners?.length ? ` · picked via ${esc(t.owners.join(' & '))}’s songs` : ''}</div>` : '';
   return `<div class="rv-track">${t.album.thumb || t.album.image ? `<img src="${esc(t.album.thumb || t.album.image)}" alt="">` : ''}<div class="m"><div class="t">${esc(t.name)}</div><div>${esc(t.artists.map(a => a.name).join(', '))}</div><div class="mute"><small>${esc(meta)}</small></div>${owners}${blend}</div>
     <div class="rv-btns">${playBtn(t)}${opts.noLike ? '' : likeBtn(t)}${openLink(t)}</div></div>`;
 }
@@ -439,7 +439,7 @@ const PRESETS = {
   cover:    { name: 'Cover reveal',  icon: '🖼️', desc: 'Guess the album from artwork that sharpens over time', set: { rule: 'classic', rounds: 10, types: { cover: 1 } } },
   years:    { name: 'Time machine',  icon: '📅', desc: 'Release years and which-came-first', set: { rule: 'classic', rounds: 10, types: { year: 1, first: 1 } } },
   typeit:   { name: 'Type it',       icon: '⌨️', desc: 'No options — type the answer, with suggestions from the whole catalog', set: { rule: 'classic', rounds: 10, answerFormat: 'text', types: { title: 1, artist: 1, album: 1 } } },
-  deep:     { name: 'Deep cuts',     icon: '🔍', desc: 'Wrong options come from the same album or artist', set: { rule: 'classic', rounds: 10, answerFormat: 'choice', difficulty: 'album', types: { title: 1, album: 1 } } },
+  deep:     { name: 'Deep cuts',     icon: '🔍', desc: 'Wrong options come from the same album or artist', set: { rule: 'classic', rounds: 10, answerFormat: 'choice', difficulty: 'album', similar: 0.35, similarMix: { album: 60, artist: 40, related: 0 }, types: { title: 1, album: 1 } } },
   survival: { name: 'Survival',      icon: '❤️', desc: 'Three lives, keep going until you run out', set: { rule: 'survival', lives: 3, types: { title: 1, artist: 1, album: 1, truefalse: 1 } } },
   blitz:    { name: 'Blitz',         icon: '⚡', desc: 'Sixty seconds, as many as you can', set: { rule: 'blitz', blitzTime: 60, timeLimit: 8, types: { title: 1, artist: 1, truefalse: 1 } } },
   chaos:    { name: 'Chaos',         icon: '🌀', desc: 'Every question type, mixed answer formats', set: { rule: 'classic', rounds: 15, answerFormat: 'mixed', types: Object.fromEntries(Object.keys(TYPES).map(k => [k, 1])) } },

@@ -43,9 +43,12 @@ Old `*.html` addresses redirect to these.
 
 ## How songs are picked
 
-- Every source (liked songs, most played, each playlist, each chart, similar songs) can be switched on or off on the Play page — charts only, one playlist only, or any mix.
+- Every source (liked songs, most played, each playlist, each chart) can be switched on or off on the Play page — charts only, one playlist only, or any mix.
 - **Balance** (Settings → Which songs): *Even* gives each switched-on source the same share of questions; *By number of songs* picks from everything evenly.
 - A song never repeats within a game until every song has been used. Songs from your last few games are kept out while there are others (toggle and number of games in Settings). A small song list still works — it just repeats sooner.
+- **Similar songs** (a per-mode setting): a share of questions swap their song for a relative you may not have saved — another song from the same album, by the same artist, or by a similar artist, in ratios you set. They're looked up on Deezer while the previous question plays, so nothing is built in advance.
+- **Multiplayer shares:** the host sets how much of each player's songs goes into the mix (e.g. 90% / 7% / 3%); 0 leaves someone's songs out.
+- Chart songs get their album's release year and genre from the server, so year and genre questions work with charts too.
 - Before a song is used, the server checks its preview file really loads. If a song still fails to play, the game drops it and picks another without using up a round.
 
 ## Settings

@@ -120,6 +120,7 @@ const DEFAULTS = {
   audioSource: 'auto', clipStart: 'random', clipLength: 0, volume: 0.7, afterAnswer: 'fade', sfx: true, oddPreview: false,
   coverStyle: 'pixelate', coverAnswer: 'album', coverAudio: false,
   yearFormat: 'slider', yearShowInfo: true,
+  similar: 0, similarMix: { album: 40, artist: 40, related: 20 },   // per mode: share of questions that use a relative of the picked song
   mixMode: 'even',                  // 'even': every song source gets the same share of questions; 'size': bigger sources come up more
   avoidRecent: true, recentGames: 3, // keep songs from your last N games out until nothing else is left
   filters: { yearMin: null, yearMax: null, genres: [], artist: '', noExplicit: false },
@@ -139,7 +140,7 @@ function saveS() { store.set('settings', S); applyAccent(); }
 /* Settings that belong to a game mode: every mode (Classic, Heardle, Custom…) keeps its own copy (Modes in quiz.js).
    Everything else in S applies to every game: audio, pacing, which songs, look. */
 const RULE_KEYS = ['rule', 'rounds', 'lives', 'blitzTime', 'timeLimit', 'types', 'answerFormat', 'numChoices', 'difficulty', 'requireArtist', 'hints', 'oddPreview',
-  'speedBonus', 'maxPts', 'minPts', 'fullWindow', 'decayEnd', 'streakBonus', 'wrongPenalty', 'clipStart', 'clipLength', 'coverStyle', 'coverAnswer', 'coverAudio', 'yearFormat', 'yearShowInfo'];
+  'speedBonus', 'maxPts', 'minPts', 'fullWindow', 'decayEnd', 'streakBonus', 'wrongPenalty', 'clipStart', 'clipLength', 'coverStyle', 'coverAnswer', 'coverAudio', 'yearFormat', 'yearShowInfo', 'similar', 'similarMix'];
 /* what the settings controls change: S, or one mode's rules while that mode's panel is open */
 const Edit = { obj: null, save: null };
 function setPath(path, v) { const ks = path.split('.'); let o = Edit.obj || S; while (ks.length > 1) o = o[ks.shift()]; o[ks[0]] = v; }
@@ -251,6 +252,38 @@ async function loadMe() {
   }
   q.delete('app'); history.replaceState(null, '', location.pathname + (q.toString() ? '?' + q : '') + location.hash);
 })();
+
+/* ---------------- players: colours, avatars, small animations ---------------- */
+const PLAYER_COLORS = ['#ffb547', '#4de0e0', '#ff5e8a', '#6fe3a4', '#c58bff', '#7aa7ff', '#ffe066', '#ff8a4c', '#f59fd0', '#a3e635', '#5eead4', '#fda4af'];
+const PlayerColors = new Map();   // name -> colour, filled from the multiplayer lobby so everyone sees the same colours
+function playerColor(name) {
+  if (PlayerColors.has(name)) return PlayerColors.get(name);
+  let h = 0; for (const ch of String(name)) h = (h * 31 + ch.codePointAt(0)) >>> 0;
+  return PLAYER_COLORS[h % PLAYER_COLORS.length];
+}
+const avatar = (name, cls = '') => `<span class="pav ${cls}" style="--pc:${playerColor(name)}" aria-hidden="true">${esc([...String(name || '?')][0].toUpperCase())}</span>`;
+const reducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+/* animate a number from the value it showed last */
+function countUp(el, to, ms = 700) {
+  if (!el) return;
+  const from = +(el.dataset.v ?? to); el.dataset.v = to;
+  if (from === to || reducedMotion()) { el.textContent = fmtN(to); return; }
+  const t0 = performance.now();
+  const step = now => { const k = Math.min(1, (now - t0) / ms), e = 1 - Math.pow(1 - k, 3); el.textContent = fmtN(Math.round(from + (to - from) * e)); if (k < 1) requestAnimationFrame(step); };
+  requestAnimationFrame(step);
+}
+/* re-render a list and slide each row (data-key) from its old place to the new one */
+function flip(container, rerender) {
+  const before = new Map($$('[data-key]', container).map(r => [r.dataset.key, r.getBoundingClientRect().top]));
+  rerender();
+  if (reducedMotion()) return;
+  for (const r of $$('[data-key]', container)) {
+    const top = before.get(r.dataset.key);
+    if (top == null) { r.animate([{ opacity: 0, transform: 'translateX(-12px)' }, { opacity: 1, transform: 'none' }], { duration: 320, easing: 'ease-out' }); continue; }
+    const d = top - r.getBoundingClientRect().top;
+    if (Math.abs(d) > 1) r.animate([{ transform: `translateY(${d}px)` }, { transform: 'none' }], { duration: 450, easing: 'cubic-bezier(.2,.8,.2,1)' });
+  }
+}
 
 /* ---------------- sound effects ---------------- */
 const SFX = {

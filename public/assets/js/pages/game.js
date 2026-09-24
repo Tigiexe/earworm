@@ -79,7 +79,7 @@ const Game = {
     $('#hudRound').innerHTML = st.total ? `Song <b class="num">${st.round}</b> of ${st.total}` : `Song <b class="num">${st.round}</b>`;
     if (st.rule === 'survival') $('#hudExtra').innerHTML = `<span aria-label="${st.lives} lives">${'❤️'.repeat(Math.max(0, st.lives))}${'🤍'.repeat(Math.max(0, S.lives - st.lives))}</span>`;
     else if (st.rule === 'blitz') this.tickBlitz(); else $('#hudExtra').textContent = '';
-    $('#hudScore').textContent = fmtN(st.score); $('#hudStreak').textContent = streakTxt(st.streak);
+    countUp($('#hudScore'), st.score); $('#hudStreak').textContent = streakTxt(st.streak);
   },
   end() {
     const st = this.st; if (!st) return;

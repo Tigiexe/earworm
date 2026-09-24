@@ -68,6 +68,12 @@ const SettingsUI = {
         ${s.speedBonus && timed ? `<div id="curveBox" style="margin:6px 0 10px">${this.curve()}</div>` : ''}
         ${item('Streak bonus', tog('streakBonus'), true, '×1.1 at 3 in a row, ×1.25 at 5, ×1.5 at 10')}
         ${item('Points lost for a wrong answer', rng('wrongPenalty', 0, 100, 5))}`)}
+      ${sec('Similar songs', `
+        ${item('Mix in similar songs', rng('similar', 0, 0.6, 0.05, '%'), true, 'How often a question swaps its song for a relative you may not have saved')}
+        ${s.similar > 0 ? `${item('Same album', rng('similarMix.album', 0, 100, 5, ''), true, 'Another song from the album the question’s song is on')}
+        ${item('Same artist', rng('similarMix.artist', 0, 100, 5, ''), true, 'Another song by the same artist')}
+        ${item('Similar artists', rng('similarMix.related', 0, 100, 5, ''), true, 'A song by an artist Deezer lists as similar')}
+        <p class="mute" style="margin:6px 0 0"><small>${this.mixText(s)}</small></p>` : ''}`)}
       ${sec('Clips', clips ? `
         ${item('Clip starts at', seg('clipStart', [['random', 'Random point'], ['start', 'The beginning'], ['middle', 'Around the chorus']]))}
         ${item('Clip length', seg('clipLength', [[0, 'Until you answer'], [2, '2s'], [5, '5s'], [10, '10s']]))}` : '')}
@@ -79,6 +85,13 @@ const SettingsUI = {
         ${item('Year answer', seg('yearFormat', [['slider', 'Slider (close counts)'], ['choice', 'Pick a year'], ['decade', 'Pick a decade']]))}
         ${item('Show title and artist', tog('yearShowInfo'))}` : '')}
       <div class="row" style="margin-top:6px">${Modes.changed(key) ? `<button class="btn sm ghost" data-act="resetMode">Reset ${esc(PRESETS[key]?.name || 'this mode')} to default</button>` : `<small class="mute">${key === 'custom' ? 'Changes save automatically.' : 'These are the default rules. Changes save automatically, only for this mode.'}</small>`}</div>`;
+  },
+
+  mixText(s) {
+    const m = s.similarMix || {}, tot = (m.album || 0) + (m.artist || 0) + (m.related || 0);
+    if (!tot) return 'Set at least one of these above 0, or no similar songs are used.';
+    const p = k => Math.round((m[k] || 0) / tot * 100);
+    return `About ${Math.round(s.similar * 100)}% of questions use a similar song: ${p('album')}% from the same album, ${p('artist')}% from the same artist, ${p('related')}% by similar artists. If one kind has nothing new, another is tried.`;
   },
 
   /* ---------------- global settings ---------------- */

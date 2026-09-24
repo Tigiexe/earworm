@@ -40,16 +40,6 @@ const Home = {
           <button class="btn sm" data-act="loadChart">Add chart</button></div>
         <p class="note" style="margin:8px 0 0">Top 100 from Deezer. Add as many charts as you like — each one shows up above.</p>
       </div>`;
-    const blendBase = on.filter(m => m.kind !== 'blend');
-    const blend = `
-      <div class="src-block"><h3>Similar songs</h3>
-        <p class="note">Songs you haven’t saved, found from the artists in ${blendBase.length ? blendBase.map(m => esc(m.label)).join(', ') : 'the sources you switch on'}.</p>
-        <label class="chk"><input type="checkbox" data-act="blendOpt" data-k="blendArtist" ${o.blendArtist ? 'checked' : ''}> More songs by the same artists</label>
-        <label class="chk"><input type="checkbox" data-act="blendOpt" data-k="blendSimilar" ${o.blendSimilar ? 'checked' : ''}> Songs by similar artists</label>
-        <div class="row"><small class="mute">Top</small><select class="field" data-act-change="blendArtists" aria-label="Artists">${[10, 20, 30, 50, 80].map(v => `<option ${o.blendArtists === v ? 'selected' : ''}>${v}</option>`).join('')}</select><small class="mute">artists,</small>
-          <select class="field" data-act-change="blendPer" aria-label="Songs per artist">${[3, 6, 10, 15].map(v => `<option ${o.blendPer === v ? 'selected' : ''}>${v}</option>`).join('')}</select><small class="mute">songs each</small></div>
-        <button class="btn sm" data-act="buildBlend" style="margin-top:8px" ${blendBase.length ? '' : 'disabled'}>${Lib.get('blend') ? 'Find new similar songs' : 'Find similar songs'}</button>
-      </div>`;
     const fName = (Me?.display_name || '').split(' ')[0];
     const where = on.length === 1 ? esc(on[0].label) : `${on.length} sources`;
     $('#main').innerHTML = `
@@ -57,7 +47,8 @@ const Home = {
         <p class="mute" style="margin:6px 0 0">${n ? `${fmtN(n)} songs from ${fmtN(sum.artists)} artists, from ${where}${sum.yMin ? `, ${sum.yMin}–${sum.yMax}` : ''}${n !== all.length ? ` (${fmtN(all.length)} before filters)` : ''}.` : all.length ? 'No songs match your filters — loosen them in Settings.' : Lib.sets.length ? 'Every source is switched off — switch one on to play.' : 'Add some songs to start.'}</p></div>
         <div class="row"><a class="btn" href="/settings">Settings</a><a class="btn" href="/multiplayer">Play with friends</a></div></div>
       <div class="home-grid">
-        <div class="panel">${mix}${spotify}${charts}${blend}</div>
+        <div class="panel">${mix}${spotify}${charts}
+          <p class="note" style="margin:14px 0 0">✨ Want songs you haven’t saved? Turn on <b>Similar songs</b> in a game mode’s settings.</p></div>
         <div>
           <div class="modes">
             ${Object.entries(PRESETS).filter(([k]) => k !== 'custom').map(([k, p]) => `<a class="mode ${n < 4 ? 'off' : ''}" href="${n < 4 ? '#' : `/game?mode=${k}`}" ${n < 4 ? 'data-act="needSongs"' : ''}><span class="ic">${p.icon}</span><b>${esc(p.name)}</b><span class="d">${esc(p.desc)}</span>${best[k] ? `<span class="best num">Best ${fmtN(best[k])}</span>` : ''}</a>`).join('')}
@@ -99,11 +90,6 @@ Object.assign(Act, {
     const o = Lib.opts; o.chart = $('#chartCountry').value; o.chartGenre = +$('#chartGenre').value; Lib.saveOpts();
     Home.task('Loading chart…', () => Lib.loadChart({ country: o.chart, genre: o.chartGenre }), m => `Added ${m.label} (${m.count} songs).`);
   },
-  blendOpt(el) { Lib.opts[el.dataset.k] = el.checked; Lib.saveOpts(); },
-  buildBlend() {
-    if (!Lib.opts.blendArtist && !Lib.opts.blendSimilar) return toast('Tick at least one kind of similar song.');
-    Home.task('Finding similar songs…', p => Lib.buildBlend(p), n => `Found ${fmtN(n)} similar songs.`);
-  },
   async pickPl() {
     if (Home.busy) return toast('Still working on the last one…');
     Modal.open('<h2>Add playlists</h2><div class="loading">Loading your playlists…</div>', 'narrow');
@@ -124,7 +110,6 @@ Object.assign(Act, {
     }, n => `Added ${chosen.length} playlist${chosen.length > 1 ? 's' : ''} (${fmtN(n)} songs).`);
   }
 });
-document.addEventListener('change', e => { const k = e.target.dataset?.actChange; if (k) { Lib.opts[k] = +e.target.value; Lib.saveOpts(); } });
 
 (async function () {
   await Lib.init();
