@@ -190,7 +190,9 @@ const Engine = {
     if (!(S.similar > 0) || Math.random() >= S.similar) return t;
     const x = await this.relative(t, pred).catch(e => { console.warn('similar', e); return null; });
     if (!x) return t;
-    this.used.delete(this.key(t));   // the original wasn't asked about, so it stays available
+    // only the song actually asked about counts: the original stays available, and "last artists" is the relative's
+    this.used.delete(this.key(t));
+    this.lastArtists[0] = normArtist(x.artists[0]?.name);
     return x;
   },
   async relative(t, pred) {
