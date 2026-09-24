@@ -33,12 +33,19 @@ const Home = {
         <div class="add-row"><button class="btn sm" data-act="pickPl">Add playlists…</button></div>
       </div>` : `
       <div class="src-block"><h3>Your Spotify songs</h3><p class="note">Log in to quiz yourself on your liked songs, most played and playlists.</p>${clientId() ? '<button class="btn primary" data-act="login">Log in with Spotify</button>' : ''}</div>`;
+    const chartCountry = o.chart || 'Worldwide';
     const charts = `
       <div class="src-block"><h3>Add a chart</h3>
-        <div class="row"><select class="field" id="chartCountry" aria-label="Country chart">${CHART_COUNTRIES.map(c => `<option ${o.chart === c ? 'selected' : ''}>${c}</option>`).join('')}</select>
-          <select class="field" id="chartGenre" aria-label="Genre chart"><option value="0">Any genre</option>${DEEZER_GENRES.map(([id, nm]) => `<option value="${id}" ${+o.chartGenre === id ? 'selected' : ''}>${esc(nm)}</option>`).join('')}</select>
-          <button class="btn sm" data-act="loadChart">Add chart</button></div>
-        <p class="note" style="margin:8px 0 0">Top 100 from Deezer. Add as many charts as you like — each one shows up above.</p>
+        <div class="row"><select class="field" id="chartCountry" aria-label="Country chart">${CHART_COUNTRIES.map(c => `<option ${chartCountry === c ? 'selected' : ''}>${c}</option>`).join('')}</select>
+          <select class="field" id="chartGenre" aria-label="Only one genre"><option value="">Any genre</option>${CHART_GENRES.map(g => `<option ${o.chartGenre === g ? 'selected' : ''}>${esc(g)}</option>`).join('')}</select></div>
+        <label class="chk ${CHART_ISO[chartCountry] ? '' : 'hidden'}" id="chartLocalRow"><input type="checkbox" id="chartLocal" ${o.chartLocal ? 'checked' : ''}> Only artists from <span id="chartLocalName">${esc(chartCountry)}</span> ${flag(CHART_ISO[chartCountry])}</label>
+        <button class="btn sm" data-act="loadChart" style="margin-top:4px">Add chart</button>
+        <p class="note" style="margin:8px 0 0">Top 100 from Deezer. The genre and local-artist options narrow that list down. Add as many charts as you like — each shows up above.
+          <br>Where artists are from comes from MusicBrainz, one artist per second the first time (then remembered). Artists it doesn’t know are kept.</p>
+      </div>
+      <div class="src-block"><h3>Add a playlist by link</h3>
+        <div class="row"><input class="field" id="plLink" placeholder="Spotify or Deezer playlist link" autocomplete="off" spellcheck="false" style="flex:1;min-width:0"><button class="btn sm" data-act="addLink">Add</button></div>
+        <p class="note" style="margin:8px 0 0">Deezer playlists work for anyone. Spotify playlists need you to be logged in, and Spotify may refuse ones you don’t own.</p>
       </div>`;
     const fName = (Me?.display_name || '').split(' ')[0];
     const where = on.length === 1 ? esc(on[0].label) : `${on.length} sources`;
@@ -78,6 +85,15 @@ const Home = {
 };
 function timeAgo(t) { if (!t) return 'never'; const m = Math.round((Date.now() - t) / 60000); if (m < 1) return 'just now'; if (m < 60) return m + ' min ago'; const h = Math.round(m / 60); if (h < 24) return h + ' h ago'; return Math.round(h / 24) + ' days ago'; }
 
+/* the "only artists from …" option follows the chosen country (not offered for Worldwide) */
+document.addEventListener('change', e => {
+  if (e.target.id !== 'chartCountry') return;
+  const c = e.target.value, cc = CHART_ISO[c];
+  $('#chartLocalRow')?.classList.toggle('hidden', !cc);
+  const n = $('#chartLocalName'); if (n) n.textContent = c;
+});
+document.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.id === 'plLink') Act.addLink(); });
+
 Object.assign(Act, {
   needSongs() { toast(Lib.all().length ? 'Fewer than 4 songs match your filters. Loosen them in Settings.' : 'Add at least 4 songs first — from Spotify, a chart, or both.'); },
   setOn(el) { Lib.toggle(el.dataset.k, el.checked); Home.render(); },
@@ -87,16 +103,20 @@ Object.assign(Act, {
   loadLiked() { Home.task('Loading liked songs…', p => Lib.loadLiked(S.maxLiked, p), m => `Loaded ${fmtN(m.count)} liked songs.`); },
   loadTop() { Home.task('Loading most played…', p => Lib.loadTop(S.topRange, p), m => `Loaded ${fmtN(m.count)} most played songs.`); },
   loadChart() {
-    const o = Lib.opts; o.chart = $('#chartCountry').value; o.chartGenre = +$('#chartGenre').value; Lib.saveOpts();
-    Home.task('Loading chart…', () => Lib.loadChart({ country: o.chart, genre: o.chartGenre }), m => `Added ${m.label} (${m.count} songs).`);
+    const o = Lib.opts; o.chart = $('#chartCountry').value; o.chartGenre = $('#chartGenre').value; o.chartLocal = !!$('#chartLocal')?.checked; Lib.saveOpts();
+    Home.task('Loading chart…', p => Lib.loadChart({ country: o.chart, genre: o.chartGenre, local: o.chartLocal && !!CHART_ISO[o.chart] }, p), m => `Added ${m.label} (${m.count} songs).`);
+  },
+  addLink() {
+    const v = $('#plLink')?.value.trim(); if (!v) return toast('Paste a playlist link first.');
+    Home.task('Loading playlist…', p => Lib.loadLink(v, p), m => `Added “${m.label}” (${fmtN(m.count)} songs).`);
   },
   async pickPl() {
     if (Home.busy) return toast('Still working on the last one…');
     Modal.open('<h2>Add playlists</h2><div class="loading">Loading your playlists…</div>', 'narrow');
     try { await Lib.fetchPlaylists(); } catch (e) { Modal.close(); return toast('Couldn’t load playlists: ' + e.message); }
     Modal.open(`<button class="btn sm ghost x" data-act="closeModal">Close</button><h2>Add playlists</h2>
-      <p class="mute"><small>Each playlist becomes its own source you can switch on and off. Spotify only lets apps read playlists you own or collaborate on, so the others are greyed out.</small></p>
-      <div class="pl-list">${Lib.playlists.map(p => `<label class="pl-item ${p.own ? '' : 'off'}">${p.image ? `<img src="${esc(p.image)}" alt="">` : '<span class="ph"></span>'}<div><b>${esc(p.name)}</b><br><small class="mute">${fmtN(p.total)} songs${p.own ? '' : ' · by ' + esc(p.owner)}${Lib.get('pl:' + p.id) ? ' · already added' : ''}</small></div><input type="checkbox" class="plPick" value="${esc(p.id)}" ${p.own ? '' : 'disabled'}></label>`).join('') || '<p class="mute">No playlists found.</p>'}</div>
+      <p class="mute"><small>Each playlist becomes its own source you can switch on and off. Spotify usually only lets apps in development mode read playlists you own or collaborate on — you can try the others (marked), and if Spotify refuses, a Deezer link to the same playlist works instead.</small></p>
+      <div class="pl-list">${Lib.playlists.map(p => `<label class="pl-item">${p.image ? `<img src="${esc(p.image)}" alt="">` : '<span class="ph"></span>'}<div><b>${esc(p.name)}</b><br><small class="mute">${fmtN(p.total)} songs${p.own ? '' : ` · by ${esc(p.owner)} · <span class="warn-t">Spotify may refuse</span>`}${Lib.get('pl:' + p.id) ? ' · already added' : ''}</small></div><input type="checkbox" class="plPick" value="${esc(p.id)}"></label>`).join('') || '<p class="mute">No playlists found.</p>'}</div>
       <div class="sheet-foot"><button class="btn ghost" data-act="closeModal">Cancel</button><button class="btn primary" data-act="plLoad">Add selected</button></div>`, 'narrow');
   },
   plLoad() {
@@ -116,5 +136,5 @@ Object.assign(Act, {
   Home.render();
   if (Auth.tok && !Me) { await loadMe(); Home.render(); }
   // first visit without an account: start with the default chart so there is something to play
-  if (!Lib.sets.length && !Auth.tok) Home.task('Loading chart…', () => Lib.loadChart({ country: Lib.opts.chart || CFG.DEFAULT_CHART }), m => `Loaded ${m.label}. Add more charts on the left.`);
+  if (!Lib.sets.length && !Auth.tok) Home.task('Loading chart…', p => Lib.loadChart({ country: Lib.opts.chart || CFG.DEFAULT_CHART }, p), m => `Loaded ${m.label}. Add more charts on the left.`);
 })();

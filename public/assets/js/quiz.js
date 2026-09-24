@@ -24,7 +24,8 @@ function trackCard(t, opts = {}) {
   const meta = [t.album.name, t.album.year].filter(Boolean).join(', ');
   const owners = t.owners?.length && !t.similar ? `<div class="owner-note">${t.owners.map(o => `<span class="pchip" style="--pc:${playerColor(o)}">${esc(o)}</span>`).join('')}<small class="mute">’s songs</small></div>` : '';
   const sm = t.similar, blend = sm ? `<div class="sim-note">${sm.orig ? playBtn(sm.orig, 'mini') : ''}<span>✨ ${sm.kind === 'album' ? `Bonus song from the same album as “${esc(sm.of)}”` : sm.kind === 'artist' ? `Bonus song by ${esc(sm.ofArtist)}, like “${esc(sm.of)}”` : `Bonus: an artist similar to ${esc(sm.ofArtist)} (“${esc(sm.of)}”)`}${t.owners?.length ? ` · picked via ${esc(t.owners.join(' & '))}’s songs` : ''}</span></div>` : '';
-  return `<div class="rv-track">${t.album.thumb || t.album.image ? `<img src="${esc(t.album.thumb || t.album.image)}" alt="">` : ''}<div class="m"><div class="t">${esc(t.name)}</div><div>${esc(t.artists.map(a => a.name).join(', '))}</div><div class="mute"><small>${esc(meta)}</small></div>${owners}${blend}</div>
+  const cc = countryOf(t), fl = flag(cc);
+  return `<div class="rv-track">${t.album.thumb || t.album.image ? `<img src="${esc(t.album.thumb || t.album.image)}" alt="">` : ''}<div class="m"><div class="t">${esc(t.name)}</div><div>${fl ? `<span title="Artist from ${esc(cc)}">${fl}</span> ` : ''}${esc(t.artists.map(a => a.name).join(', '))}</div><div class="mute"><small>${esc(meta)}</small></div>${owners}${blend}</div>
     <div class="rv-btns">${playBtn(t)}${opts.noLike ? '' : likeBtn(t)}${openLink(t)}</div></div>`;
 }
 
@@ -431,6 +432,50 @@ function floatPts(pts) {
   host.appendChild(f); setTimeout(() => f.remove(), 1200);
 }
 const streakTxt = n => n >= 3 ? `${n} in a row` + (S.streakBonus ? ` ×${Score.streak(n)}` : '') : '';
+
+/* ---------------- "what's in this game" side panel ---------------- */
+/* built once when a game starts (by the host in multiplayer, then sent to everyone) */
+function buildInfo(modeKey, players = null) {
+  const p = PRESETS[modeKey] || PRESETS.custom, groups = Engine.groups;
+  const tot = groups.reduce((a, g) => a + g.tracks.length, 0) || 1;
+  const sources = players
+    ? players.filter(x => x.pct > 0).map(x => ({ label: x.name, pct: x.pct, player: true }))
+    : groups.map(g => ({ label: Lib.sourceLabel(g.key), n: g.tracks.length, pct: Math.round((S.mixMode === 'size' ? g.tracks.length / tot : 1 / groups.length) * 1000) / 10 })).sort((a, b) => b.pct - a.pct);
+  const f = S.filters, filters = [];
+  if (f.yearMin || f.yearMax) filters.push(`${f.yearMin || '…'}–${f.yearMax || '…'}`);
+  if (f.genres?.length) filters.push(f.genres.join(', '));
+  if (f.artist) filters.push('only ' + f.artist);
+  if (f.noExplicit) filters.push('no explicit songs');
+  return {
+    icon: p.icon, name: p.name, summary: settingsSummary(S), songs: Engine.pool.length, sources, byPlayer: !!players,
+    similar: S.similar > 0 ? { share: S.similar, mix: { ...S.similarMix } } : null,
+    types: Engine.types.map(k => TYPES[k].name), skipped: Engine.skipped.map(k => TYPES[k].name),
+    filters, recent: S.avoidRecent ? S.recentGames : 0, audio: Player.mode() === 'sdk' ? 'Full songs (Spotify Premium)' : '30-second previews'
+  };
+}
+function similarText(sm) {
+  const m = sm.mix || {}, t = (m.album || 0) + (m.artist || 0) + (m.related || 0) || 1, p = k => Math.round((m[k] || 0) / t * 100);
+  return [[p('album'), 'same album'], [p('artist'), 'same artist'], [p('related'), 'similar artists']].filter(x => x[0] > 0).map(x => `${x[0]}% ${x[1]}`).join(' · ');
+}
+/* live: {score, correct, answered, streak, last} — single player only; multiplayer has the scoreboard */
+function infoHTML(info, live = null) {
+  if (!info) return '';
+  const pct = n => `${Math.round(+n || 0)}%`;
+  return `<div class="gi">
+    <div class="gi-mode"><span class="gi-ic">${esc(info.icon)}</span><div><b>${esc(info.name)}</b><small class="mute">${esc(info.summary)}</small></div></div>
+    ${live ? `<div class="gi-live"><div><b class="num">${fmtN(live.correct)}/${fmtN(live.answered)}</b><span>right</span></div><div><b class="num">${fmtN(live.best)}</b><span>best streak</span></div></div>` : ''}
+    ${live?.last ? `<div class="gi-last"><small class="mute">Last song came from</small><br>${esc(live.last)}</div>` : ''}
+    <h4>In the mix <small class="mute">${fmtN(info.songs)} songs</small></h4>
+    ${(info.sources || []).slice(0, 8).map(s => `<div class="gi-src"><span class="l">${s.player ? `<i style="background:${playerColor(s.label)}"></i>` : ''}${esc(s.label)}</span><span class="bar"><i style="width:${Math.min(100, +s.pct || 0)}%;${s.player ? `background:${playerColor(s.label)}` : ''}"></i></span><b class="num">${pct(s.pct)}</b></div>`).join('')}
+    ${(info.sources || []).length > 8 ? `<small class="mute">+${info.sources.length - 8} more</small>` : ''}
+    <h4>Similar songs</h4>
+    <p>${info.similar ? `On for about ${pct(info.similar.share * 100)} of questions<br><small class="mute">${esc(similarText(info.similar))}</small>` : '<span class="mute">Off</span>'}</p>
+    <h4>Questions</h4>
+    <p>${esc(info.types.join(', '))}${info.skipped?.length ? `<br><small class="mute">Skipped (not enough song data): ${esc(info.skipped.join(', '))}</small>` : ''}</p>
+    ${info.filters?.length ? `<h4>Filters</h4><p>${esc(info.filters.join(' · '))}</p>` : ''}
+    <p class="mute" style="margin-top:10px"><small>${info.recent ? `Songs from your last ${info.recent} games are kept out while there are others. ` : ''}Audio: ${esc(info.audio)}.</small></p>
+  </div>`;
+}
 
 /* ---------------- game modes ---------------- */
 const PRESETS = {

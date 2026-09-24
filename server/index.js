@@ -9,6 +9,7 @@ const cfg = require('./config');
 const { Buckets, log } = require('./util');
 const music = require('./deezer');
 const { PAGES, render } = require('./pages');
+const countries = require('./countries').create(cfg);
 
 /* ---------------- static files (kept in memory, pre-compressed) ---------------- */
 const TYPES = {
@@ -134,6 +135,14 @@ async function api(req, res, url) {
       const j = await music.chart({ country: url.searchParams.get('country'), genre: url.searchParams.get('genre') });
       return sendJSON(req, res, 200, j, { 'Cache-Control': 'private, max-age=120' });
     }
+    if (p === '/api/countries') {
+      const names = (url.searchParams.get('names') || '').split('|').map(n => n.trim().slice(0, 100)).filter(Boolean).slice(0, 100);
+      return sendJSON(req, res, 200, countries.get(names));
+    }
+    if (p === '/api/dzplaylist') {
+      const j = await music.playlist(url.searchParams.get('id'));
+      return sendJSON(req, res, 200, j, { 'Cache-Control': 'private, max-age=120' });
+    }
     if (p.startsWith('/api/dz/')) {
       const j = await music.proxy(decodeURIComponent(p.slice(8)), url.searchParams);
       return sendJSON(req, res, 200, j, { 'Cache-Control': 'private, max-age=300' });
@@ -207,7 +216,7 @@ server.listen(cfg.port, cfg.host, () => {
 
 function shutdown(sig) {
   log(`${sig} received, shutting down`);
-  relay?.close();
+  relay?.close(); countries.save();
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 5000).unref();
 }

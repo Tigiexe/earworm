@@ -27,8 +27,10 @@ const Game = {
     if (!types.length) { toast('None of the selected question types work with these songs. Try Song title or Artist.'); return; }
     if (Engine.skipped.length) toast('Skipped ' + Engine.skipped.map(k => TYPES[k].name).join(', ') + ' — not enough song data for it.');
     Player.unlock();
+    this.info = buildInfo(MODE);
+    $('#gameWrap').classList.add('mp'); $('#mpBoard').classList.remove('hidden');
     this.st = { key: MODE, rule: S.rule, round: 0, score: 0, streak: 0, best: 0, lives: S.rule === 'survival' ? S.lives : null, hist: [], correct: 0, total: S.rule === 'classic' ? S.rounds : null, blitzEnd: null };
-    $('.hud').classList.remove('hidden'); this.hud(); this.next();
+    $('.hud').classList.remove('hidden'); this.hud(); this.side(); this.next();
   },
   over() {
     const st = this.st; if (!st) return true;
@@ -70,9 +72,16 @@ const Game = {
     const before = st.score; st.score = Math.max(0, st.score + pts); pts = st.score - before;
     st.hist.push({ q, res, pts });
     floatPts(pts); this.hud();
+    const t = q.track;
+    st.last = !t ? '' : t.similar ? `✨ a similar song (via ${t.similar.orig ? Lib.sourceLabel(t.similar.orig.src?.[0] || '') : 'your songs'})` : (t.src || []).map(k => Lib.sourceLabel(k)).join(' & ');
+    this.side();
     QUI.markReveal(res);
     if (q.track && (q.audio || q.type === 'cover')) Player.afterAnswer(q.track, QUI.ctx?.startSec); else Player.fadeOut(300);
     Reveal.show({ q, res, pts, last: this.over(), onNext: () => this.next(), auto: st.rule === 'blitz' ? 1 : S.autoAdvance });
+  },
+  side() {
+    const st = this.st, b = $('#mpBoard'); if (!st || !b) return;
+    b.innerHTML = infoHTML(this.info, { correct: st.correct, answered: st.hist.length, best: st.best, last: st.last });
   },
   hud() {
     const st = this.st; if (!st) return;

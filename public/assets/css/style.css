@@ -482,3 +482,27 @@ a.mode.feature{display:flex}
 .pbtn.mini{width:26px;height:26px}
 .pbtn.mini .pi{border-left-width:8px;border-top-width:5px;border-bottom-width:5px;margin-left:2px}
 .pbtn.mini.on .pi{width:8px;height:9px}
+
+/* ---------- "about this game" side panel ---------- */
+.gi{font-size:14px}
+.gi h4{margin:14px 0 6px;font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--mute);display:flex;justify-content:space-between;align-items:baseline}
+.gi h4 small{text-transform:none;letter-spacing:0;font-weight:600}
+.gi p{margin:0}
+.gi-mode{display:flex;gap:10px;align-items:flex-start}
+.gi-mode .gi-ic{font-size:26px;line-height:1}
+.gi-mode b{display:block;font-size:16px}
+.gi-mode small{display:block;line-height:1.35}
+.gi-live{display:flex;gap:18px;margin-top:12px}
+.gi-live b{display:block;font-size:22px;font-weight:800;line-height:1.1}
+.gi-live span{color:var(--mute);font-size:12px}
+.gi-last{margin-top:10px;padding:8px 10px;border-radius:10px;background:var(--card);animation:rise .3s ease-out}
+.gi-src{display:grid;grid-template-columns:minmax(0,1fr) 60px 42px;gap:8px;align-items:center;padding:3px 0}
+.gi-src .l{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gi-src .l i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px}
+.gi-src .bar{height:6px;background:var(--bg);border-radius:4px;overflow:hidden}
+.gi-src .bar i{display:block;height:100%;background:var(--acc);transition:width .3s}
+.gi-src b{text-align:right;font-size:13px}
+.gi-more{margin-top:12px;border-top:1px solid var(--line);padding-top:8px}
+.gi-more summary{cursor:pointer;color:var(--acc);font-weight:600;font-size:14px}
+.game-wrap.mp{grid-template-columns:1fr 280px}
+@media (max-width:860px){.game-wrap.mp{grid-template-columns:1fr}}

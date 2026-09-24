@@ -36,6 +36,7 @@ if (publicUrl && !/^https?:\/\/[^/]+$/.test(publicUrl)) {
 module.exports = {
   ROOT,
   PUBLIC_DIR: path.join(ROOT, 'public'),
+  stateDir: path.resolve(ROOT, env('STATE_DIR', 'data')),   // where the server may save things (artist countries)
   dev: process.argv.includes('--dev') || env('NODE_ENV') === 'development',
   host: env('HOST', '127.0.0.1'),
   port: int('PORT', 8000),

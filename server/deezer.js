@@ -50,7 +50,7 @@ const PATHS = [
   [/^search(\/(track|artist|album|playlist))?$/, HOUR],
   [/^artist\/\d{1,12}(\/(top|related|albums))?$/, 6 * HOUR],
   [/^album\/\d{1,12}(\/tracks)?$/, 12 * HOUR],
-  [/^playlist\/\d{1,15}\/tracks$/, 30 * MIN],
+  [/^playlist\/\d{1,15}(\/tracks)?$/, 30 * MIN],
   [/^chart\/\d{1,6}\/tracks$/, 30 * MIN],
   [/^track\/(\d{1,15}|isrc:[A-Za-z0-9]{12})$/, 6 * HOUR]
 ];
@@ -106,6 +106,21 @@ async function addAlbumInfo(tracks) {
     if (a.release_date && !t.album.release_date) t.album.release_date = a.release_date;
     if (a.genre_id > 0) t.album.genre_id = a.genre_id;
   }
+}
+
+/* ---------------- any public Deezer playlist (pasted as a link) ---------------- */
+async function playlist(id) {
+  if (!/^\d{1,15}$/.test(id || '')) throw httpError(400, 'Bad playlist');
+  const info = await getJSON(`${DZ}playlist/${id}`, dzLimit, { ttl: 30 * MIN });
+  let data = [];
+  for (let index = 0; index < 1000; index += 100) {   // up to 1,000 songs
+    const page = await getJSON(`${DZ}playlist/${id}/tracks?limit=100&index=${index}`, dzLimit, { ttl: 30 * MIN });
+    data.push(...(page.data || []));
+    if (!page.next || !(page.data || []).length) break;
+  }
+  data = data.filter(d => d && d.id && d.readable !== false);
+  await addAlbumInfo(data);
+  return { title: info.title || 'Deezer playlist', data };
 }
 
 /* ---------------- previews ---------------- */
@@ -165,4 +180,4 @@ async function preview({ dz, isrc, title, artist }) {
   return r;
 }
 
-module.exports = { proxy, chart, preview, log };
+module.exports = { proxy, chart, playlist, preview, log };

@@ -11,6 +11,9 @@ Group=earworm
 WorkingDirectory=/opt/earworm
 ExecStart=/usr/bin/env node server/index.js
 Environment=NODE_ENV=production
+# the only folder the app may write to (saved artist countries)
+StateDirectory=earworm
+Environment=STATE_DIR=/var/lib/earworm
 Restart=on-failure
 RestartSec=3
 

@@ -109,6 +109,43 @@ const Dz = {
 const CHART_COUNTRIES = ['Worldwide', 'USA', 'UK', 'Canada', 'Australia', 'Germany', 'France', 'Italy', 'Spain', 'Netherlands', 'Belgium', 'Austria', 'Switzerland', 'Sweden', 'Norway', 'Denmark', 'Finland', 'Poland', 'Croatia', 'Serbia', 'Slovenia', 'Ireland', 'Portugal', 'Brazil', 'Mexico', 'Colombia', 'Argentina', 'Turkey', 'South Africa'];
 const DEEZER_GENRES = [[132, 'Pop', 'Pop'], [116, 'Rap & Hip-Hop', 'Hip-Hop & Rap'], [152, 'Rock', 'Rock'], [113, 'Dance', 'Electronic'], [106, 'Electro', 'Electronic'], [165, 'R&B', 'R&B & Soul'], [85, 'Alternative', 'Indie & Alternative'], [464, 'Metal', 'Metal'], [197, 'Latin', 'Latin'], [84, 'Country', 'Country & Folk'], [144, 'Reggae', 'Reggae & Afro'], [129, 'Jazz', 'Jazz & Blues'], [98, 'Classical', 'Classical & Soundtrack'], [173, 'Film & games', 'Classical & Soundtrack']];
 const TOP_RANGES = [['short_term', 'last 4 weeks'], ['medium_term', 'last 6 months'], ['long_term', 'past year']];
+/* genres a chart can be narrowed to (from each song's album genre on Deezer) */
+const CHART_GENRES = ['Pop', 'Hip-Hop & Rap', 'Rock', 'Electronic', 'R&B & Soul', 'Indie & Alternative', 'Metal', 'Latin', 'Country & Folk', 'Reggae & Afro', 'Jazz & Blues', 'Classical & Soundtrack'];
+const dzBroad = d => DZ_GENRES[d.album?.genre_id]?.[1];
+
+/* ---------------- where artists are from (MusicBrainz, through our server) ---------------- */
+const CHART_ISO = { USA: 'US', UK: 'GB', Canada: 'CA', Australia: 'AU', Germany: 'DE', France: 'FR', Italy: 'IT', Spain: 'ES', Netherlands: 'NL', Belgium: 'BE', Austria: 'AT',
+  Switzerland: 'CH', Sweden: 'SE', Norway: 'NO', Denmark: 'DK', Finland: 'FI', Poland: 'PL', Croatia: 'HR', Serbia: 'RS', Slovenia: 'SI', Ireland: 'IE', Portugal: 'PT',
+  Brazil: 'BR', Mexico: 'MX', Colombia: 'CO', Argentina: 'AR', Turkey: 'TR', 'South Africa': 'ZA' };
+const EX_YU = ['HR', 'RS', 'SI', 'BA', 'ME', 'MK', 'XK'];
+const flag = cc => /^[A-Z]{2}$/.test(cc || '') && cc !== 'XW' && cc !== 'XE' ? String.fromCodePoint(...[...cc].map(c => 0x1F1A5 + c.charCodeAt(0))) : '';
+const countryOf = t => Artists.country[normArtist(t?.artists?.[0]?.name)];
+/* does an artist's country count as "from" a chart's country? Old records often say Yugoslavia (YU). Unknown artists are kept. */
+const fromCountry = (cc, want) => !cc || cc === want || (cc === 'YU' && EX_YU.includes(want));
+const Artists = {
+  country: store.get('artistCountry', {}),   // artist key -> 'HR', or '' when MusicBrainz doesn't know
+  /* looks up the first artist of each song; the server asks MusicBrainz about one artist per second and remembers every answer */
+  async lookup(tracks, prog = () => {}) {
+    const names = new Map();
+    for (const t of tracks) { const n = t.artists?.[0]?.name, k = normArtist(n); if (k && !(k in this.country) && !names.has(k)) names.set(k, n); }
+    const total = names.size; if (!total) return;
+    let todo = [...names.values()], still = Date.now();
+    while (todo.length) {
+      const next = [];
+      for (let i = 0; i < todo.length; i += 100) {
+        const batch = todo.slice(i, i + 100);
+        const r = await api('/api/countries', { names: batch.join('|') });
+        for (const n of batch) { if (n in r.countries) this.country[normArtist(n)] = r.countries[n]; else next.push(n); }
+      }
+      store.set('artistCountry', this.country);
+      if (next.length < todo.length) still = Date.now();
+      else if (Date.now() - still > 90_000) break;   // no progress for a while: keep what we have
+      todo = next;
+      prog(`Checking where artists are from: ${fmtN(total - todo.length)} of ${fmtN(total)} (about ${Math.ceil(todo.length * 1.1)}s left)`, (total - todo.length) / total);
+      if (todo.length) await sleep(2500);
+    }
+  }
+};
 
 /* ---------------- similar songs: relatives of a song, found on Deezer when a question asks for one ----------------
    album: another song from the same album · artist: another song by the same artist · related: a song by a similar artist */
@@ -274,7 +311,12 @@ const Lib = {
   async fetchPlaylist(pl, prog) {
     let url = `/playlists/${pl.id}/items?limit=50`, out = [];
     while (url && out.length < 3000) {
-      const j = await sp(url);
+      let j;
+      try { j = await sp(url); }
+      catch (e) {
+        if (e.status === 403 || e.status === 404) throw new Error(`Spotify won’t let this app read “${pl.name}” — apps in development mode can usually only read playlists you own or collaborate on. If it’s also on Deezer, paste the Deezer link instead.`);
+        throw e;
+      }
       for (const it of j.items || []) { const n = norm(it.item || it.track, 'pl:' + pl.id); if (n) out.push(n); }
       prog(`${pl.name}: ${out.length}`, out.length / Math.max(1, j.total || 1)); url = j.next;
     }
@@ -285,13 +327,44 @@ const Lib = {
   async loadPlaylist(pl, prog) { return this.putSet('pl:' + pl.id, 'pl', pl.name, await this.fetchPlaylist(pl, prog), { id: pl.id }); },
 
   /* ---- Deezer charts ---- */
-  async loadChart({ country, genre }) {
-    const g = DEEZER_GENRES.find(x => x[0] === +genre);
-    const data = await Dz.chart(g ? { genre: g[0] } : { country });
-    const key = g ? 'chart:g' + g[0] : 'chart:' + country;
-    // the server adds each album's release date and genre id; a genre chart already says its genre
-    const tracks = data.map(d => { const b = g ? g[2] : DZ_GENRES[d.album?.genre_id]?.[1]; return fromDeezer(d, key, b ? { broad: [b] } : {}); }).filter(Boolean);
-    return this.putSet(key, 'chart', g ? `${g[1]} chart` : `Top ${country}`, tracks, g ? { genre: g[0] } : { country });
+  /* a country's top 100 on Deezer, optionally narrowed to one genre and/or to artists from that country */
+  async loadChart({ country, genre, local }, prog = () => {}) {
+    if (typeof genre === 'number') { genre = DEEZER_GENRES.find(x => x[0] === genre)?.[2] || ''; country = country || 'Worldwide'; }   // charts saved by older versions
+    country = country || 'Worldwide'; genre = CHART_GENRES.includes(genre) ? genre : '';
+    const cc = local ? CHART_ISO[country] : null;
+    const key = `chart:${country}${genre ? ':' + genre : ''}${cc ? ':local' : ''}`;
+    const label = `Top ${country}${genre ? ' · ' + genre : ''}${cc ? ' · local artists' : ''}`;
+    prog('Loading chart…', 0.1);
+    const data = await Dz.chart({ country });   // the server adds each album's release date and genre
+    let tracks = data.map(d => { const b = dzBroad(d); return fromDeezer(d, key, b ? { broad: [b] } : {}); }).filter(Boolean);
+    if (genre) tracks = tracks.filter(t => t.broad?.includes(genre));
+    if (cc) { await Artists.lookup(tracks, prog); tracks = tracks.filter(t => fromCountry(countryOf(t), cc)); }
+    if (tracks.length < 4) throw new Error(`Only ${tracks.length} songs in ${label} right now — try without the genre or local filter.`);
+    return this.putSet(key, 'chart', label, tracks, { country, genre, local: !!cc });
+  },
+  /* any public Deezer playlist */
+  async loadDeezerPlaylist(id, prog = () => {}) {
+    prog('Loading the Deezer playlist…', 0.2);
+    const r = await api('/api/dzplaylist', { id }, { timeout: 60000, retries: 1 });
+    const key = 'dzpl:' + id;
+    const tracks = (r.data || []).map(d => { const b = dzBroad(d); return fromDeezer(d, key, b ? { broad: [b] } : {}); }).filter(Boolean);
+    return this.putSet(key, 'dzpl', r.title || 'Deezer playlist', tracks, { id });
+  },
+  /* a playlist link: Spotify (needs login, and Spotify decides which it lets this app read) or Deezer (any public one) */
+  async loadLink(link, prog) {
+    const s = String(link || '').trim();
+    const dz = s.match(/deezer\.com\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?playlist\/(\d{1,15})/i);
+    if (dz) return this.loadDeezerPlaylist(dz[1], prog);
+    const spm = s.match(/open\.spotify\.com\/(?:intl-[a-z-]+\/)?(?:user\/[^/]+\/)?playlist\/([A-Za-z0-9]{22})/) || s.match(/^spotify:playlist:([A-Za-z0-9]{22})$/);
+    if (spm) {
+      if (!Auth.tok) throw new Error('Log in with Spotify to add Spotify playlists — or use a Deezer playlist link, which works without logging in.');
+      let pl;
+      try { const j = await sp(`/playlists/${spm[1]}?fields=name,owner(display_name)`); pl = { id: spm[1], name: j?.name || 'Spotify playlist' }; }
+      catch (e) { throw new Error(e.status === 404 ? 'Spotify can’t find that playlist (is it private?).' : 'Spotify won’t let Earworm open that playlist. ' + e.message); }
+      return this.loadPlaylist(pl, prog);
+    }
+    if (/link\.deezer\.com|deezer\.page\.link|spotify\.link/i.test(s)) throw new Error('That’s a short share link. Open it in your browser first, then copy the full address from the address bar.');
+    throw new Error('Paste a playlist link from Spotify (open.spotify.com/playlist/…) or Deezer (deezer.com/…/playlist/…).');
   },
 
   /* reload a source with the options it was made with */
@@ -300,7 +373,8 @@ const Lib = {
     if (m.kind === 'liked') return this.loadLiked(m.opts.max || S.maxLiked, prog);
     if (m.kind === 'top') return this.loadTop(m.opts.range || S.topRange, prog);
     if (m.kind === 'pl') { const pl = this.playlists.find(p => p.id === m.opts.id) || { id: m.opts.id, name: m.label }; return this.loadPlaylist(pl, prog); }
-    if (m.kind === 'chart') return this.loadChart(m.opts);
+    if (m.kind === 'chart') return this.loadChart(m.opts, prog);
+    if (m.kind === 'dzpl') return this.loadDeezerPlaylist(m.opts.id, prog);
   },
   /* ---- genres: Spotify artist tags first, Deezer album genres for the rest. Both are kept in this browser
      (localStorage "genres" and "dzGenres"), so a scan only ever looks up artists it hasn't seen before. ---- */

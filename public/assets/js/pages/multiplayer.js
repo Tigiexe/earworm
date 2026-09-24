@@ -131,7 +131,7 @@ const MP = {
       this.send(id, { t: 'welcome', id });
       toast(name + (old ? ' is back' : ' joined'));
       if (this.state !== 'lobby') {
-        this.send(id, { t: 'start', names: this.names, total: this.total });
+        this.send(id, { t: 'start', names: this.names, total: this.total, info: this.info });
         if (this.state === 'question' && this.curQ) this.send(id, { t: 'q', round: this.round, total: this.total, q: this.curQ, limit: this.curLimit });
       }
       this.lobbyChanged();
@@ -198,7 +198,8 @@ const MP = {
     for (const p of Object.values(this.players)) { p.score = 0; p.streak = 0; p.correct = 0; }
     this.from = {}; this.shown = {};
     this.names = Engine.names; this.total = S.rounds; this.round = 0; this.state = 'playing'; this.myHist = [];
-    this.broadcast({ t: 'start', names: this.names, total: this.total });
+    this.info = buildInfo(this.mode, this.pub());
+    this.broadcast({ t: 'start', names: this.names, total: this.total, info: this.info });
     this.enterGame(); this.hostNext();
   },
   enterGame() {
@@ -312,7 +313,7 @@ const MP = {
         if (d.state === 'lobby') { if (this.state !== 'lobby') { QUI.abort(); Player.fadeOut(300); } this.state = 'lobby'; this.renderLobby(); }
         else this.renderBoard(d.players);
         break;
-      case 'start': this.names = d.names || {}; this.total = d.total; this.state = 'playing'; this.myHist = []; this.enterGame(); $('#qArea').innerHTML = '<div class="loading">Get ready…</div>'; break;
+      case 'start': this.names = d.names || {}; this.total = d.total; this.info = d.info && typeof d.info === 'object' ? d.info : null; this.state = 'playing'; this.myHist = []; this.enterGame(); $('#qArea').innerHTML = '<div class="loading">Get ready…</div>'; break;
       case 'q':
         if (!d.q || typeof d.q !== 'object') return;
         if (!$('#scr-game').classList.contains('active')) this.enterGame();
@@ -361,7 +362,10 @@ const MP = {
         <span class="pos">${i + 1}</span>${avatar(p.name)}
         <span class="n">${esc(p.name)}${p.connected ? '' : ' <small class="mute">(left)</small>'}${p.streak >= 3 ? ` <small class="streak">🔥${p.streak}</small>` : ''}</span>
         ${asking && p.connected ? `<span class="st ${p.answered ? 'done' : ''}" title="${p.answered ? 'Locked in' : 'Thinking'}">${p.answered ? '✓' : '…'}</span>` : ''}
-        <b class="num sc" data-v="${this.shown[p.id] ?? p.score}">${fmtN(this.shown[p.id] ?? p.score)}</b></div>`).join('')}`;
+        <b class="num sc" data-v="${this.shown[p.id] ?? p.score}">${fmtN(this.shown[p.id] ?? p.score)}</b></div>`).join('')}
+        ${this.info ? `<details class="gi-more"><summary>About this game</summary>${infoHTML(this.info)}</details>` : ''}`;
+      const more = $('.gi-more', b); if (more && this.infoOpen) more.open = true;
+      more?.addEventListener('toggle', () => { this.infoOpen = more.open; });
     });
     for (const p of sorted) { countUp($(`.board-row[data-key="${CSS.escape(p.id)}"] .sc`, b), p.score); this.shown[p.id] = p.score; }
     const me = players.find(p => p.id === this.myId); if (me) countUp($('#hudScore'), me.score);
