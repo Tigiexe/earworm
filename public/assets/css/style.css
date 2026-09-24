@@ -478,3 +478,7 @@ a.mode.feature{display:flex}
 @keyframes rightPulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--ok) 60%,transparent)}100%{box-shadow:0 0 0 14px transparent}}
 @keyframes shake{20%,60%{transform:translateX(-5px)}40%,80%{transform:translateX(5px)}}
 .hud-score #hudScore{display:inline-block}
+.sim-note{display:flex;align-items:center;gap:8px}
+.pbtn.mini{width:26px;height:26px}
+.pbtn.mini .pi{border-left-width:8px;border-top-width:5px;border-bottom-width:5px;margin-left:2px}
+.pbtn.mini.on .pi{width:8px;height:9px}

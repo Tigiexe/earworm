@@ -23,7 +23,7 @@ function trackCard(t, opts = {}) {
   if (!t) return '';
   const meta = [t.album.name, t.album.year].filter(Boolean).join(', ');
   const owners = t.owners?.length && !t.similar ? `<div class="owner-note">${t.owners.map(o => `<span class="pchip" style="--pc:${playerColor(o)}">${esc(o)}</span>`).join('')}<small class="mute">’s songs</small></div>` : '';
-  const sm = t.similar, blend = sm ? `<div class="sim-note">✨ ${sm.kind === 'album' ? `Bonus song from the same album as “${esc(sm.of)}”` : sm.kind === 'artist' ? `Bonus song by ${esc(sm.ofArtist)}, like “${esc(sm.of)}”` : `Bonus: an artist similar to ${esc(sm.ofArtist)}`}${t.owners?.length ? ` · picked via ${esc(t.owners.join(' & '))}’s songs` : ''}</div>` : '';
+  const sm = t.similar, blend = sm ? `<div class="sim-note">${sm.orig ? playBtn(sm.orig, 'mini') : ''}<span>✨ ${sm.kind === 'album' ? `Bonus song from the same album as “${esc(sm.of)}”` : sm.kind === 'artist' ? `Bonus song by ${esc(sm.ofArtist)}, like “${esc(sm.of)}”` : `Bonus: an artist similar to ${esc(sm.ofArtist)} (“${esc(sm.of)}”)`}${t.owners?.length ? ` · picked via ${esc(t.owners.join(' & '))}’s songs` : ''}</span></div>` : '';
   return `<div class="rv-track">${t.album.thumb || t.album.image ? `<img src="${esc(t.album.thumb || t.album.image)}" alt="">` : ''}<div class="m"><div class="t">${esc(t.name)}</div><div>${esc(t.artists.map(a => a.name).join(', '))}</div><div class="mute"><small>${esc(meta)}</small></div>${owners}${blend}</div>
     <div class="rv-btns">${playBtn(t)}${opts.noLike ? '' : likeBtn(t)}${openLink(t)}</div></div>`;
 }

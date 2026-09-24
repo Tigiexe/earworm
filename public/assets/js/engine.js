@@ -212,7 +212,7 @@ const Engine = {
       });
       if (!ok.length) continue;
       const x = pick(ok);
-      x.similar = { kind, of: t.name, ofArtist: t.artists[0]?.name || '' };
+      x.similar = { kind, of: t.name, ofArtist: t.artists[0]?.name || '', orig: slimTrack(t) };
       x.src = ['similar']; if (t.owners) x.owners = t.owners;
       this.used.add(trackKey(x));
       return x;
