@@ -117,7 +117,8 @@ const DEFAULTS = {
   types: { title: true, artist: true, album: false, year: false, cover: false, heardle: false, genre: false, truefalse: false, first: false, oddone: false },
   answerFormat: 'choice', numChoices: 4, difficulty: 'normal', autocomplete: true, requireArtist: true, hints: true, autoAdvance: 5, readyPause: 1,
   speedBonus: true, maxPts: 100, minPts: 50, fullWindow: 2, decayEnd: 10, streakBonus: true, wrongPenalty: 0,
-  audioSource: 'auto', clipStart: 'random', clipLength: 0, volume: 0.7, afterAnswer: 'fade', sfx: true, oddPreview: false,
+  audioSource: 'auto', clipStart: 'random', clipLength: 0, volume: 0.2, afterAnswer: 'fade', sfx: true, oddPreview: false,
+  romanized: true,   // prefer English / romanized song and artist names over Japanese, Korean or Chinese script
   coverStyle: 'pixelate', coverAnswer: 'album', coverAudio: false,
   yearFormat: 'slider', yearShowInfo: true,
   similar: 0, similarMix: { album: 40, artist: 40, related: 20 },   // per mode: share of questions that use a relative of the picked song
@@ -214,7 +215,9 @@ const Auth = {
 async function sp(path, opts = {}) {
   for (let attempt = 0; attempt < 4; attempt++) {
     const t = await Auth.token();
-    const res = await fetch(path.startsWith('http') ? path : 'https://api.spotify.com/v1' + path, { ...opts, headers: { Authorization: 'Bearer ' + t, ...(opts.body ? { 'Content-Type': 'application/json' } : {}), ...(opts.headers || {}) } });
+    // asking for English makes Spotify send its official English / romanized names where it has them (米津玄師 → Kenshi Yonezu)
+    const lang = S.romanized ? 'en-US,en;q=0.9' : (navigator.languages || [navigator.language]).join(',');
+    const res = await fetch(path.startsWith('http') ? path : 'https://api.spotify.com/v1' + path, { ...opts, headers: { Authorization: 'Bearer ' + t, 'Accept-Language': lang, ...(opts.body ? { 'Content-Type': 'application/json' } : {}), ...(opts.headers || {}) } });
     if (res.status === 401 && attempt === 0) { Auth.tok.exp = 0; continue; }
     if (res.status === 429) {
       let body = {}; try { body = await res.clone().json(); } catch {}
@@ -322,7 +325,7 @@ const Header = {
     h.innerHTML = `<a class="brand" href="${SITE_DIR}play"><span class="brand-disc"></span>Earworm</a>
       <nav class="nav">${links.map(([href, label, key]) => `<a href="${SITE_DIR}${href}" class="${active === key ? 'on' : ''}">${label}</a>`).join('')}</nav>
       <div class="top-r"><span id="audioBadge" class="badge hidden"></span>
-        <div class="vol"><button class="vol-ic" data-act="mute" aria-label="Mute or unmute" title="Mute / unmute">${volIcon(S.volume)}</button><input type="range" id="hdrVol" min="0" max="1" step="0.05" value="${S.volume}" aria-label="Volume" title="Volume"></div>
+        <div class="vol"><button class="vol-ic" data-act="mute" aria-label="Mute or unmute" title="Mute / unmute">${volIcon(S.volume)}</button><input type="range" id="hdrVol" min="0" max="1" step="0.01" value="${S.volume}" aria-label="Volume" title="Volume"></div>
         <div class="menu"><button class="user" data-act="menu" aria-haspopup="true">${av}<span class="uname">${esc(Me?.display_name || 'Guest')}</span></button>
           <div class="menu-pop hidden" id="menuPop">
             <a href="${SITE_DIR}stats">Your stats</a>
@@ -359,7 +362,7 @@ const Act = {
   login() { if (!clientId()) return go(''); Auth.login().catch(e => toast(e.message)); },
   logout() { Auth.logout(); go(''); },
   closeModal() { Modal.close(); },
-  mute() { setVolume(S.volume > 0 ? 0 : (S.lastVolume || 0.7), true); }
+  mute() { setVolume(S.volume > 0 ? 0 : (S.lastVolume || 0.2), true); }
 };
 document.addEventListener('click', e => {
   const el = e.target.closest('[data-act]'); if (!el || el.disabled) return;

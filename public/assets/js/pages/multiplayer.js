@@ -30,6 +30,7 @@ function cleanTracks(list, owner) {
   const str = (v, n = 300) => typeof v === 'string' ? v.slice(0, n) : '';
   const url = v => typeof v === 'string' && /^https:\/\/[^\s"'<>]+$/.test(v) ? v.slice(0, 500) : '';
   const int = v => Number.isInteger(v) && v > 0 ? v : null;
+  const strs = v => Array.isArray(v) ? v.filter(x => typeof x === 'string').slice(0, 3).map(x => x.slice(0, 200)) : [];
   return list.slice(0, 1500).map(t => {
     if (!t || typeof t !== 'object' || !t.album || typeof t.album !== 'object' || !Array.isArray(t.artists)) return null;
     const al = t.album, artists = t.artists.slice(0, 6).map(a => ({ id: str(a?.id, 80), name: str(a?.name) })).filter(a => a.name);
@@ -40,6 +41,7 @@ function cleanTracks(list, owner) {
       dur: int(t.dur) || 0, isrc: /^[A-Za-z0-9]{12}$/.test(t.isrc || '') ? t.isrc : '', explicit: t.explicit === true, link: url(t.link),
       dz: t.dz && int(t.dz.id) ? { id: t.dz.id, artist: int(t.dz.artist), album: int(t.dz.album) } : undefined,
       broad: Array.isArray(t.broad) ? t.broad.filter(b => typeof b === 'string').slice(0, 4).map(b => b.slice(0, 40)) : undefined,
+      alt: t.alt && typeof t.alt === 'object' ? { names: strs(t.alt.names), artists: strs(t.alt.artists) } : undefined,
       src: ['mp'], owners: [owner]
     };
   }).filter(Boolean);

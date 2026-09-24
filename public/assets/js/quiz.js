@@ -267,7 +267,10 @@ const QUI = {
   /* returns {ok, needArtist} for typed answers */
   checkText(ctx, given) {
     const q = ctx.q, artists = (q.track?.artists || []).map(a => a.name);
-    if (q.kind === 'title') return matchSong(given, q.answer, artists, ctx.sc.requireArtist ?? S.requireArtist);
+    if (q.kind === 'title') {   // the romanized name and the original-script name both count
+      const rs = (q.accept || [q.answer]).map(a => matchSong(given, a, [...artists, ...(q.track?.alt?.artists || [])], ctx.sc.requireArtist ?? S.requireArtist));
+      return rs.find(r => r.ok) || rs.find(r => r.needArtist) || { ok: false };
+    }
     if (q.kind === 'album') { const parts = String(given).split(SEP_RE); return { ok: isMatch(given, q.accept) || (parts.length >= 2 && parts.some((p, i) => isMatch(p, q.accept) && artistMatch(parts[1 - i] ?? '', artists))) || (parts.length >= 2 && isMatch(parts.slice(1).join(' '), q.accept)) }; }
     if (q.kind === 'artist') return { ok: artistMatch(given, q.accept) };
     return { ok: isMatch(given, q.accept) };

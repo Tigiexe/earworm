@@ -134,11 +134,13 @@ const SettingsUI = {
       ${sec('Pace', `
         ${item('Break before each song', rng('readyPause', 0, 3, 0.5, 'off0'), true, 'Shows what you’ll guess next before the clip and timer start (not in Blitz)')}
         ${item('Next song automatically', rng('autoAdvance', 0, 15, 1, 'off0'), true, 'After the answer is shown (Blitz always moves on after 1s)')}`)}
-      ${sec('Typing answers', item('Suggest names while typing', tog('autocomplete'), true, 'Searches the whole Deezer catalog, not just your songs'))}
+      ${sec('Song names', `
+        ${item('Prefer English / romanized names', tog('romanized'), true, 'For songs and artists written in Japanese, Korean or Chinese, use the English or romanized name when Spotify or Deezer has one (米津玄師 → Kenshi Yonezu, 紅蓮華 → Gurenge). Names are looked up in the background and remembered. The original names still count as right answers.')}
+        ${item('Suggest names while typing', tog('autocomplete'), true, 'Searches the whole Deezer catalog, not just your songs')}`)}
       ${sec('Audio', `
         ${item('Play songs with', seg('audioSource', [['auto', 'Spotify if Premium'], ['preview', '30s previews']]))}
         ${item('After you answer', seg('afterAnswer', [['stop', 'Stop'], ['fade', 'Play 2s more, then fade'], ['full', 'Keep playing until next song']]))}
-        ${item('Volume', rng('volume', 0, 1, 0.05, '%'))}
+        ${item('Volume', rng('volume', 0, 1, 0.01, '%'))}
         ${item('Sound effects', tog('sfx'))}`)}
       ${sec('Which songs', this.filtersHTML())}
       ${sec('Genres', this.genresHTML())}
@@ -198,6 +200,7 @@ document.addEventListener('change', e => {
   else if (el.type === 'range' || el.type === 'number' || el.dataset.num) v = el.value === '' ? null : +el.value;
   else v = el.value;
   setPath(k, v); saveEdit();
+  if (k === 'romanized') { Lib.changed(); if (v) for (const m of Lib.sets) Romanize.schedule(m.key); }
   if (!$('.set-sec')) return;
   SettingsUI.render();   // a change can show or hide other options (and the reset button)
 });

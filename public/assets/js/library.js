@@ -79,8 +79,76 @@ function dedupe(list) {
 }
 function slimTrack(t) {
   if (!t) return t;
-  return { id: t.id, uri: t.uri, name: t.name, artists: t.artists, album: t.album, dur: t.dur, isrc: t.isrc, explicit: t.explicit, preview: t.preview, link: t.link, owners: t.owners, broad: t.broad, dz: t.dz, src: t.src, similar: t.similar };
+  return { id: t.id, uri: t.uri, name: t.name, artists: t.artists, album: t.album, dur: t.dur, isrc: t.isrc, explicit: t.explicit, preview: t.preview, link: t.link, owners: t.owners, broad: t.broad, dz: t.dz, src: t.src, similar: t.similar, alt: t.alt };
 }
+/* answers that count for a song's title / artist: the shown name plus the original-script name it replaced */
+const titleAccept = t => [t.name, ...(t.alt?.names || [])];
+const artistAccept = t => [...t.artists.map(a => a.name), ...(t.alt?.artists || [])];
+
+/* ---------------- English / romanized names ----------------
+   For songs written in Japanese, Korean or Chinese script. Spotify is asked for English names when songs load
+   (it has official ones for many). Songs still in those scripts are looked up in the background: Deezer's version
+   of the same recording (by ISRC; good for artist names), then Apple's US iTunes store (good for titles:
+   夜に駆ける → Yoru ni kakeru, 紅蓮華 → Gurenge). Found names are kept next to the originals (t.rom), so the setting
+   can be switched off instantly, and the original names always stay valid answers. */
+const NON_LATIN = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+const isLatinName = s => !!s && !NON_LATIN.test(s) && /\p{Script=Latin}/u.test(s);
+/* how a song shows up with the setting on */
+function romanView(t) {
+  const r = t.rom; if (!r || (!r.n && !r.a)) return t;
+  const a0 = t.artists[0];
+  return { ...t, name: r.n || t.name, artists: r.a && a0 ? [{ ...a0, name: r.a }, ...t.artists.slice(1)] : t.artists, alt: { names: r.n ? [t.name] : [], artists: r.a && a0 ? [a0.name] : [] } };
+}
+const Romanize = {
+  cache: store.get('romanNames', {}),   // isrc (or name key) -> { n: title, a: artist } — empty strings when nothing was found
+  queue: [], running: false, lastItunes: 0,
+  needs: t => NON_LATIN.test(t.name) || NON_LATIN.test(t.artists[0]?.name || ''),
+  schedule(setKey) { if (!S.romanized || this.queue.includes(setKey)) return; this.queue.push(setKey); this.run(); },
+  async run() {
+    if (this.running) return; this.running = true;
+    let found = 0;
+    try {
+      while (this.queue.length && S.romanized) {
+        const key = this.queue.shift(), tracks = Lib.data.get(key); if (!tracks) continue;
+        let touched = false;
+        for (const t of tracks.filter(x => this.needs(x) && !x.rom)) {
+          const k = t.isrc || trackKey(t);
+          if (!(k in this.cache)) { this.cache[k] = await this.find(t); store.set('romanNames', this.cache); }
+          const r = this.cache[k];
+          if (r && (r.n || r.a)) { t.rom = r; touched = true; found++; }
+        }
+        if (touched && Lib.data.get(key) === tracks) { await DB.set('set:' + key, tracks); Lib.changed(); }
+      }
+    } finally { this.running = false; }
+    if (found && /^\/(play|settings)?$/.test(location.pathname)) toast(`Found English / romanized names for ${fmtN(found)} song${found > 1 ? 's' : ''}.`);
+  },
+  async find(t) {
+    const out = { n: '', a: '' }, a0 = t.artists[0]?.name || '';
+    const wantTitle = NON_LATIN.test(t.name), wantArtist = NON_LATIN.test(a0);
+    if (t.isrc) {
+      try {
+        const d = await Dz.get('track/isrc:' + t.isrc);
+        if (wantTitle && isLatinName(d?.title_short || d?.title)) out.n = d.title_short || d.title;
+        if (wantArtist && isLatinName(d?.artist?.name)) out.a = d.artist.name;
+      } catch {}
+    }
+    if (wantTitle && !out.n) {
+      // iTunes allows about 20 searches a minute from each browser
+      const wait = this.lastItunes + 3200 - Date.now(); if (wait > 0) await sleep(wait); this.lastItunes = Date.now();
+      try {
+        const p = new URLSearchParams({ media: 'music', entity: 'song', limit: '10', country: 'US', lang: 'en_us', term: `${out.a || a0} ${t.name}` });
+        const j = await (await fetch('https://itunes.apple.com/search?' + p, { signal: AbortSignal.timeout(8000) })).json();
+        const artistOk = r => [out.a, a0].filter(Boolean).some(x => { const A = normArtist(r.artistName), B = normArtist(x); return nearEq(A, B) || A.includes(B) || B.includes(A); });
+        const extra = /cover|karaoke|instrumental|remix|first take|live|acoustic|english ver/i;
+        const hit = (j.results || []).find(r => r.trackName && isLatinName(r.trackName) && artistOk(r) && !extra.test(r.trackName)
+          && (!t.dur || !r.trackTimeMillis || Math.abs(r.trackTimeMillis - t.dur) < 6000));
+        if (hit) out.n = cleanTitle(hit.trackName);
+        if (hit && wantArtist && !out.a && isLatinName(hit.artistName)) out.a = hit.artistName;
+      } catch {}
+    }
+    return out;
+  }
+};
 
 /* ---------------- Deezer (free, no login) — through our server ---------------- */
 const Dz = {
@@ -255,6 +323,7 @@ const Lib = {
     sets.forEach((m, i) => { if (Array.isArray(lists[i]) && lists[i].length) { this.sets.push(m); this.data.set(m.key, lists[i]); } });
     if (this.sets.length !== sets.length) this.saveMeta();
     this.changed();
+    for (const m of this.sets) if ((this.data.get(m.key) || []).some(t => Romanize.needs(t) && !t.rom && !((t.isrc || trackKey(t)) in Romanize.cache))) Romanize.schedule(m.key);
     return this;
   },
   saveMeta() { store.set('sets', this.sets); },
@@ -271,13 +340,17 @@ const Lib = {
     const i = this.sets.findIndex(s => s.key === key); if (i >= 0) this.sets[i] = m; else this.sets.push(m);
     this.data.set(key, tracks); this.saveMeta(); this.changed();
     await DB.set('set:' + key, tracks);
+    Romanize.schedule(key);   // English / romanized names, in the background
     return m;
   },
   async removeSet(key) { this.sets = this.sets.filter(s => s.key !== key); this.data.delete(key); this.saveMeta(); this.changed(); await DB.del('set:' + key); },
   toggle(key, on) { const m = this.get(key); if (m) { m.on = !!on; this.saveMeta(); this.changed(); } },
   only(key) { for (const m of this.sets) m.on = m.key === key; this.saveMeta(); this.changed(); },
   /* everything the quiz can use right now */
-  all() { if (!this._all) this._all = dedupe(this.enabled().flatMap(m => this.data.get(m.key) || [])); return this._all; },
+  all() {
+    if (!this._all) { const list = dedupe(this.enabled().flatMap(m => this.data.get(m.key) || [])); this._all = S.romanized ? list.map(romanView) : list; }
+    return this._all;
+  },
 
   /* ---- Spotify ---- */
   async fetchLiked(max, prog) {

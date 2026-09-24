@@ -263,10 +263,10 @@ async function makeQ(type) {
   switch (type) {
     case 'title':
       t = await E.pickSong(); if (!t) return null;
-      q.track = slimTrack(t); q.suggest = 'title'; await withChoices('title', t.name, x => x.name, t); break;
+      q.track = slimTrack(t); q.suggest = 'title'; await withChoices('title', t.name, x => x.name, t, titleAccept(t)); break;
     case 'artist':
       t = await E.pickSong(x => x.artists.length); if (!t) return null;
-      q.track = slimTrack(t); q.suggest = 'artist'; await withChoices('artist', t.artists[0].name, x => x.artists[0]?.name, t, t.artists.map(a => a.name)); break;
+      q.track = slimTrack(t); q.suggest = 'artist'; await withChoices('artist', t.artists[0].name, x => x.artists[0]?.name, t, artistAccept(t)); break;
     case 'album':
       t = (await E.pickSong(x => x.album.name && normAns(x.album.name) !== normAns(x.name))) || (await E.pickSong(x => x.album.name)); if (!t) return null;
       q.track = slimTrack(t); q.suggest = 'album'; await withChoices('album', t.album.name, x => x.album.name, t); break;
@@ -290,15 +290,15 @@ async function makeQ(type) {
       q.track = slimTrack(t); q.audio = !!S.coverAudio;
       q.coverStyle = S.coverStyle === 'random' ? pick(['pixelate', 'blur', 'tiles', 'zoom']) : S.coverStyle;
       q.zoomOrigin = `${15 + rand(70)}% ${15 + rand(70)}%`;
-      if (S.coverAnswer === 'artist') { q.suggest = 'artist'; await withChoices('artist', t.artists[0].name, x => x.artists[0]?.name, t, t.artists.map(a => a.name)); }
-      else if (S.coverAnswer === 'title') { q.suggest = 'title'; await withChoices('title', t.name, x => x.name, t); }
+      if (S.coverAnswer === 'artist') { q.suggest = 'artist'; await withChoices('artist', t.artists[0].name, x => x.artists[0]?.name, t, artistAccept(t)); }
+      else if (S.coverAnswer === 'title') { q.suggest = 'title'; await withChoices('title', t.name, x => x.name, t, titleAccept(t)); }
       else { q.suggest = 'album'; await withChoices('album', t.album.name, x => x.album.name, t); }
       break;
     case 'heardle':
       t = await E.pickSong(); if (!t) return null;
       q.track = slimTrack(t); q.suggest = 'title'; q.stages = HEARDLE_STAGES;
       if (q.startFrac === -1) q.startFrac = 0.35;
-      await withChoices('title', t.name, x => x.name, t); break;
+      await withChoices('title', t.name, x => x.name, t, titleAccept(t)); break;
     case 'genre': {
       t = await E.pickSong(x => broadOf(x).size); if (!t) return null;
       q.track = slimTrack(t); const g = [...broadOf(t)]; const ans = pick(g);
