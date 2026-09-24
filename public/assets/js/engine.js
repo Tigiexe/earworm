@@ -3,7 +3,8 @@
 const Score = {
   speed(t, sc = S) { const M = sc.maxPts, m = Math.min(sc.minPts, sc.maxPts), a = sc.fullWindow, b = sc.decayEnd; if (!sc.speedBonus || t <= a) return M; if (t >= b || b <= a) return m; return Math.round(M - (M - m) * (t - a) / (b - a)); },
   cover(frac, sc = S) { if (!sc.speedBonus) return sc.maxPts; return Math.round(sc.maxPts - (sc.maxPts - Math.min(sc.minPts, sc.maxPts)) * frac); },
-  heardle(stage, sc = S) { const f = [1, 0.7, 0.45, 0.25, 0.1, 0][stage] ?? 0; const m = Math.min(sc.minPts, sc.maxPts); return Math.round(m + (sc.maxPts - m) * f); },
+  /* Heardle: top score at the first step, falling to the lowest right-answer score at the last one */
+  heardle(stage, sc = S, steps = 6) { const n = Math.max(1, steps - 1), f = Math.pow(Math.max(0, n - stage) / n, 1.25); const m = Math.min(sc.minPts, sc.maxPts); return Math.round(m + (sc.maxPts - m) * f); },
   yearFactor(d) { return [1, 0.8, 0.6, 0.4, 0.2, 0.2][d] ?? 0; },
   streak(n) { return n >= 10 ? 1.5 : n >= 5 ? 1.25 : n >= 3 ? 1.1 : 1; }
 };
@@ -60,7 +61,13 @@ function guessOf(q) {
     default: return 'song';   // title, heardle
   }
 }
-const HEARDLE_STAGES = [1, 2, 4, 7, 11, 16];
+const HEARDLE_STAGES = [1, 2, 4, 7, 11, 16];   // steps used before they became a setting (older stats)
+/* a mode's Heardle steps, cleaned up: 2–10 increasing values between 0.1 and 30 seconds */
+function heardleSteps(v) {
+  const a = [...new Set((Array.isArray(v) ? v : []).map(Number).filter(x => x >= 0.1 && x <= 30).map(x => Math.round(x * 10) / 10))].sort((a, b) => a - b).slice(0, 10);
+  return a.length >= 2 ? a : [0.1, 1, 2, 4, 7, 11, 16];
+}
+const fmtSec = v => `${Math.round(v * 10) / 10}s`;
 const DIFFICULTIES = [['easy', 'Random'], ['normal', 'Similar'], ['hard', 'Very similar'], ['artist', 'Same artist'], ['album', 'Same album']];
 
 function artistGroups(pool) {
@@ -296,7 +303,7 @@ async function makeQ(type) {
       break;
     case 'heardle':
       t = await E.pickSong(); if (!t) return null;
-      q.track = slimTrack(t); q.suggest = 'title'; q.stages = HEARDLE_STAGES;
+      q.track = slimTrack(t); q.suggest = 'title'; q.stages = heardleSteps(S.heardleStages);
       if (q.startFrac === -1) q.startFrac = 0.35;
       await withChoices('title', t.name, x => x.name, t, titleAccept(t)); break;
     case 'genre': {

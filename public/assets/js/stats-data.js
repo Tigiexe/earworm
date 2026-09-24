@@ -20,7 +20,7 @@ const Stats = {
     const answers = hist.map(h => {
       const t = h.q.track || {};
       return { t: h.q.type, ok: h.res.correct ? 1 : 0, pf: +(h.res.factor || 0).toFixed(2), pts: h.pts, el: +(h.res.elapsed || 0).toFixed(2), to: h.res.timeout ? 1 : 0, hint: h.res.hint ? 1 : 0,
-        id: t.id, ti: t.name, ar: t.artists?.[0]?.name, img: t.album?.thumb, d: h.res.extra?.diff, s: h.res.extra?.stage, rs: h.res.extra?.reveal };
+        id: t.id, ti: t.name, ar: t.artists?.[0]?.name, img: t.album?.thumb, d: h.res.extra?.diff, s: h.res.extra?.stage, hs: h.res.extra?.secs, rs: h.res.extra?.reveal };
     });
     const g = { at: Date.now(), key: game.key, name: game.name, score: game.score, n: hist.length, c: hist.filter(h => h.res.correct).length, streak: game.bestStreak || 0, mp: game.mp ? 1 : 0, place: game.place, players: game.players, answers };
     let newBest = false;
@@ -44,7 +44,7 @@ const Stats = {
     const days = new Set(games.map(g => new Date(g.at).toDateString()));
     let dayStreak = 0; for (let d = new Date(); days.has(d.toDateString()); d.setDate(d.getDate() - 1)) dayStreak++;
     const years = answers.filter(a => a.t === 'year' && a.d != null).map(a => a.d);
-    const heardle = answers.filter(a => a.t === 'heardle' && a.ok && a.s != null).map(a => HEARDLE_STAGES[a.s]);
+    const heardle = answers.filter(a => a.t === 'heardle' && a.ok && a.s != null).map(a => a.hs ?? HEARDLE_STAGES[a.s]);
     const covers = answers.filter(a => a.t === 'cover' && a.ok && a.rs != null).map(a => a.rs);
     return {
       games: games.length + (this.d.legacyGames || 0), recorded: games.length, answers: answers.length,

@@ -122,6 +122,7 @@ const DEFAULTS = {
   coverStyle: 'pixelate', coverAnswer: 'album', coverAudio: false,
   yearFormat: 'slider', yearShowInfo: true,
   similar: 0, similarMix: { album: 40, artist: 40, related: 20 },   // per mode: share of questions that use a relative of the picked song
+  heardleStages: [0.1, 1, 2, 4, 7, 11, 16],                         // per mode: seconds of the song you get at each Heardle step
   mixMode: 'even',                  // 'even': every song source gets the same share of questions; 'size': bigger sources come up more
   avoidRecent: true, recentGames: 3, // keep songs from your last N games out until nothing else is left
   filters: { yearMin: null, yearMax: null, genres: [], artist: '', noExplicit: false },
@@ -141,7 +142,7 @@ function saveS() { store.set('settings', S); applyAccent(); }
 /* Settings that belong to a game mode: every mode (Classic, Heardle, Custom…) keeps its own copy (Modes in quiz.js).
    Everything else in S applies to every game: audio, pacing, which songs, look. */
 const RULE_KEYS = ['rule', 'rounds', 'lives', 'blitzTime', 'timeLimit', 'types', 'answerFormat', 'numChoices', 'difficulty', 'requireArtist', 'hints', 'oddPreview',
-  'speedBonus', 'maxPts', 'minPts', 'fullWindow', 'decayEnd', 'streakBonus', 'wrongPenalty', 'clipStart', 'clipLength', 'coverStyle', 'coverAnswer', 'coverAudio', 'yearFormat', 'yearShowInfo', 'similar', 'similarMix'];
+  'speedBonus', 'maxPts', 'minPts', 'fullWindow', 'decayEnd', 'streakBonus', 'wrongPenalty', 'clipStart', 'clipLength', 'coverStyle', 'coverAnswer', 'coverAudio', 'yearFormat', 'yearShowInfo', 'similar', 'similarMix', 'heardleStages'];
 /* what the settings controls change: S, or one mode's rules while that mode's panel is open */
 const Edit = { obj: null, save: null };
 function setPath(path, v) { const ks = path.split('.'); let o = Edit.obj || S; while (ks.length > 1) o = o[ks.shift()]; o[ks[0]] = v; }

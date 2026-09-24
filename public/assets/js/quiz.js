@@ -107,7 +107,8 @@ const QUI = {
     const q = ctx.q;
     if (q.type === 'heardle') return `<div class="hd-seg" id="hdSeg"></div>
       <div class="row" style="justify-content:center;margin-bottom:14px"><button class="btn primary" data-q="play" data-keep="1" id="hdPlay">Play</button><button class="btn" data-q="skip" id="hdSkip">Skip</button></div>
-      ${q.format === 'text' ? this.textHTML(q) : this.choicesHTML(q, ctx)}<div class="hd-log" id="hdLog"></div>`;
+      ${q.format === 'text' ? this.textHTML(q) : this.choicesHTML(q, ctx)}
+      <ol class="hd-tries" id="hdLog" aria-label="Your attempts">${q.stages.map((s, i) => `<li data-st="${i}" class="${i === 0 ? 'now' : ''}"><span class="sec num">${fmtSec(s)}</span><span class="g"></span></li>`).join('')}</ol>`;
     if (q.format === 'text') return this.textHTML(q);
     if (q.format === 'slider') {
       const mid = Math.round((q.min + q.max) / 2);
@@ -223,7 +224,7 @@ const QUI = {
   },
   potential(ctx) {
     const q = ctx.q; let p;
-    if (q.type === 'cover') p = Score.cover(ctx.revealStep / COVER_STEPS, ctx.sc); else if (q.type === 'heardle') p = Score.heardle(ctx.stage, ctx.sc); else p = Score.speed(ctx.elapsed(), ctx.sc);
+    if (q.type === 'cover') p = Score.cover(ctx.revealStep / COVER_STEPS, ctx.sc); else if (q.type === 'heardle') p = Score.heardle(ctx.stage, ctx.sc, ctx.q.stages.length); else p = Score.speed(ctx.elapsed(), ctx.sc);
     return Math.round(p * (ctx.hint ? 0.75 : 1));
   },
   click(ctx, e) {
@@ -281,7 +282,7 @@ const QUI = {
     if (q.format === 'choice') { correct = given === q.answerIndex; factor = correct ? 1 : 0; shown = q.choices[given] ?? ''; }
     else if (q.format === 'text') { correct = !!given && this.checkText(ctx, given).ok; factor = correct ? 1 : 0; shown = given || '—'; }
     else if (q.format === 'slider') { const d = Math.abs(given - q.year); factor = Score.yearFactor(d); correct = d <= 2; shown = String(given); extra.diff = d; }
-    const base = q.type === 'cover' ? Score.cover(ctx.revealStep / COVER_STEPS, sc) : q.type === 'heardle' ? Score.heardle(ctx.stage, sc) : Score.speed(el, sc);
+    const base = q.type === 'cover' ? Score.cover(ctx.revealStep / COVER_STEPS, sc) : q.type === 'heardle' ? Score.heardle(ctx.stage, sc, q.stages.length) : Score.speed(el, sc);
     return { correct, factor, points: Math.round(base * factor * (ctx.hint ? 0.75 : 1)), given: shown, elapsed: el, extra };
   },
   needArtistMsg(ctx, given) {
@@ -347,9 +348,10 @@ const QUI = {
   /* heardle */
   heardleUI(ctx) {
     const q = ctx.q, s = q.stages, st = ctx.stage;
-    $('#hdSeg').innerHTML = s.map((v, i) => `<i style="flex:${v - (s[i - 1] || 0)}" class="${i <= st ? 'on' : ''}"></i>`).join('');
-    $('#hdPlay').textContent = `Play ${s[st]}s`;
-    $('#hdSkip').textContent = st < s.length - 1 ? `Skip (+${s[st + 1] - s[st]}s)` : 'Skip';
+    $('#hdSeg').innerHTML = s.map((v, i) => `<i style="flex:${Math.max(0.35, v - (s[i - 1] || 0))}" class="${i <= st ? 'on' : ''}"></i>`).join('');
+    $('#hdPlay').textContent = `Play ${fmtSec(s[st])}`;
+    $('#hdSkip').textContent = st < s.length - 1 ? `Skip (+${fmtSec(s[st + 1] - s[st])})` : 'Skip';
+    $$('#hdLog li').forEach(li => li.classList.toggle('now', +li.dataset.st === st && !ctx.done));
     const pts = $('#qPts'); if (pts) pts.textContent = '+' + this.potential(ctx) + ' pts';
   },
   async playStage(ctx, first = false) {
@@ -364,19 +366,28 @@ const QUI = {
     const q = ctx.q;
     if (q.format === 'text' && this.needArtistMsg(ctx, given)) return;
     const res = this.grade(ctx, given);
-    if (res.correct) { ctx.locked = true; if (q.format === 'choice') $(`#qArea [data-i="${given}"]`)?.classList.add('picked'); res.extra.stage = ctx.stage; ctx.finish(res); return; }
+    if (res.correct) {
+      ctx.locked = true; if (q.format === 'choice') $(`#qArea [data-i="${given}"]`)?.classList.add('picked');
+      this.heardleMark(ctx.stage, 'hit', '✓ ' + (q.format === 'choice' ? q.choices[given] : given));
+      res.extra.stage = ctx.stage; res.extra.secs = q.stages[ctx.stage]; ctx.finish(res); return;
+    }
     if (q.format === 'choice') { const b = $(`#qArea [data-i="${given}"]`); if (b) { b.classList.add('wrong'); b.disabled = true; } }
     this.heardleNext(ctx, q.format === 'choice' ? q.choices[given] : given);
   },
   heardleNext(ctx, wrongGuess) {
     if (ctx.locked) return;
     const q = ctx.q;
-    $('#hdLog').insertAdjacentHTML('beforeend', `<div class="${wrongGuess ? 'x' : ''}">${wrongGuess ? '✗ ' + esc(wrongGuess) : 'Skipped'}</div>`);
+    this.heardleMark(ctx.stage, wrongGuess ? 'miss' : 'skip', wrongGuess ? '✗ ' + wrongGuess : 'Skipped');
     const inp = $('#qInput'); if (inp) { inp.value = ''; inp.focus(); }
     if (ctx.stage >= q.stages.length - 1) return this.heardleFail(ctx, wrongGuess);
     ctx.stage++; this.heardleUI(ctx); this.playStage(ctx);
   },
-  heardleFail(ctx, last) { if (ctx.locked) return; ctx.locked = true; ctx.finish({ correct: false, factor: 0, points: 0, given: last || '—', extra: { stage: ctx.stage } }); }
+  heardleFail(ctx, last) { if (ctx.locked) return; ctx.locked = true; ctx.finish({ correct: false, factor: 0, points: 0, given: last || '—', extra: { stage: ctx.stage } }); },
+  /* fill in one row of the attempts list */
+  heardleMark(stage, cls, text) {
+    const li = $(`#hdLog li[data-st="${stage}"]`); if (!li) return;
+    li.className = cls; li.querySelector('.g').textContent = text;
+  }
 };
 
 /* ---------------- answer reveal ---------------- */
@@ -386,7 +397,7 @@ function verdict(q, res) {
   if (res.correct) {
     let text = pick(['Correct', 'Nailed it', 'Yes!', 'Spot on']);
     if (q.type === 'year' && res.extra?.diff) text = `Off by ${res.extra.diff} — close enough`;
-    if (q.type === 'heardle') text = `Got it in ${q.stages[res.extra?.stage ?? 0]}s`;
+    if (q.type === 'heardle') text = `Got it in ${fmtSec(q.stages[res.extra?.stage ?? 0])}`;
     return { cls: 'good', text };
   }
   if (res.factor > 0) return { cls: 'part', text: `Off by ${res.extra?.diff} years` };

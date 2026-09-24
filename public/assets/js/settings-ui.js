@@ -8,6 +8,7 @@ const tog = k => `<label class="sw"><input type="checkbox" data-set="${k}" ${get
 const item = (label, ctrl, show = true, note = '') => show ? `<div class="set-item"><label>${esc(label)}${note ? `<br><small class="mute">${esc(note)}</small>` : ''}</label><div>${ctrl}</div></div>` : '';
 const sec = (title, body) => body.trim() ? `<div class="set-sec"><h3>${esc(title)}</h3>${body}</div>` : '';
 function fmtRange(v, unit) { if (unit === 'off0') return +v === 0 ? 'Off' : v + 's'; if (unit === '%') return Math.round(v * 100) + '%'; return v + unit; }
+const HD_PRESETS = [['Quick start', [0.1, 1, 2, 4, 7, 11, 16]], ['Original Heardle', [1, 2, 4, 7, 11, 16]], ['Tiny', [0.1, 0.3, 0.6, 1, 2, 4]], ['Relaxed', [1, 3, 6, 10, 15, 25]]];
 const ACCENTS = ['#ffb547', '#ff5e8a', '#6fe3a4', '#7aa7ff', '#c58bff', '#ffe066', '#4de0e0', '#ff8a4c'];
 
 const SettingsUI = {
@@ -81,6 +82,9 @@ const SettingsUI = {
         ${item('Reveal style', seg('coverStyle', [['pixelate', 'Pixels'], ['blur', 'Blur'], ['tiles', 'Tiles'], ['zoom', 'Zoom'], ['random', 'Surprise me']]))}
         ${item('Guess from the cover', seg('coverAnswer', [['album', 'Album'], ['artist', 'Artist'], ['title', 'Song']]))}
         ${item('Play the song during cover reveal', tog('coverAudio'))}` : '')}
+      ${sec('Heardle', has('heardle') ? `
+        ${item('Song you get at each step', `<input class="field num" id="hdSteps" value="${esc(heardleSteps(s.heardleStages).join(', '))}" aria-label="Heardle steps in seconds" style="max-width:320px">`, true, 'Seconds, separated by commas: first try, then after each skip or wrong guess. 2 to 10 steps, 0.1–30 seconds.')}
+        <div class="chips" style="margin:4px 0 0">${HD_PRESETS.map(([name, v]) => `<button type="button" class="chip ${heardleSteps(s.heardleStages).join() === v.join() ? 'on' : ''}" data-act="hdPreset" data-v="${v.join(',')}">${esc(name)} <small>${v.map(fmtSec).join(' ')}</small></button>`).join('')}</div>` : '')}
       ${sec('Release years', has('year') ? `
         ${item('Year answer', seg('yearFormat', [['slider', 'Slider (close counts)'], ['choice', 'Pick a year'], ['decade', 'Pick a decade']]))}
         ${item('Show title and artist', tog('yearShowInfo'))}` : '')}
@@ -173,6 +177,7 @@ Object.assign(Act, {
     SettingsUI.scanning = false; SettingsUI.render();
   },
   forgetGenres() { if (!confirm('Forget all saved genres? You’ll need to scan again.')) return; Lib.forgetGenres(); SettingsUI.render(); },
+  hdPreset(el) { setPath('heardleStages', el.dataset.v.split(',').map(Number)); saveEdit(); SettingsUI.render(); },
   forgetRecent() { Recent.clear(); toast('Recent songs forgotten — every song is fair game again.'); },
   fReset() { S.filters = clone(DEFAULTS.filters); saveS(); SettingsUI.render(); },
   resetSettings() {
@@ -194,6 +199,10 @@ document.addEventListener('input', e => {
   SettingsUI.refreshCurve();
 });
 document.addEventListener('change', e => {
+  if (e.target.id === 'hdSteps') {   // "0.1, 1, 2, 4" -> Heardle steps
+    const v = heardleSteps(e.target.value.split(/[,;\s]+/).map(x => parseFloat(x.replace(/s$/i, ''))));
+    setPath('heardleStages', v); saveEdit(); SettingsUI.render(); return;
+  }
   const el = e.target; if (!el.dataset || !el.dataset.set || el.dataset.act) return;
   const k = el.dataset.set; let v;
   if (el.type === 'checkbox') v = el.checked;
