@@ -90,7 +90,7 @@ const SettingsUI = {
     const artists = [...groups.entries()].filter(x => x[1] >= 3).sort((a, b) => b[1] - a[1]).slice(0, 150);
     return `
       ${item('Release years', `<div class="row"><input class="field num" style="width:110px" type="number" data-set="filters.yearMin" placeholder="${sum.yMin || 'From'}" value="${f.yearMin ?? ''}" aria-label="From year"> <span class="mute">to</span> <input class="field num" style="width:110px" type="number" data-set="filters.yearMax" placeholder="${sum.yMax || 'To'}" value="${f.yearMax ?? ''}" aria-label="To year"></div>`, true, 'Songs without a known year are skipped when this is set')}
-      ${item('Genres', genres.length ? `<div class="chips">${genres.map(([g, c]) => `<button type="button" class="chip ${f.genres.includes(g) ? 'on' : ''}" data-act="fGenre" data-g="${esc(g)}">${esc(g)} <small>${c}</small></button>`).join('')}</div>` : `<small class="mute">Scan genres on the Play page, or load a genre chart.</small>`)}
+      ${item('Genres', genres.length ? `<div class="chips">${genres.map(([g, c]) => `<button type="button" class="chip ${f.genres.includes(g) ? 'on' : ''}" data-act="fGenre" data-g="${esc(g)}">${esc(g)} <small>${c}</small></button>`).join('')}</div>` : `<small class="mute">No genres yet — scan them in Genres below.</small>`)}
       ${item('Only this artist', `<select class="field" data-set="filters.artist"><option value="">Any artist</option>${artists.map(([a, c]) => `<option value="${esc(a)}" ${f.artist === a ? 'selected' : ''}>${esc(a)} (${c})</option>`).join('')}</select>`)}
       ${item('Balance between sources', seg('mixMode', [['even', 'Even'], ['size', 'By number of songs']]), true, 'Even: each source you switched on (liked songs, a chart, a friend…) comes up equally often, however big it is')}
       ${item('Avoid songs from recent games', tog('avoidRecent'), true, 'Only when there are enough other songs — small song lists still work')}
@@ -98,6 +98,23 @@ const SettingsUI = {
       ${item('Skip explicit songs', tog('filters.noExplicit'))}
       <p class="mute" style="margin:8px 0 0"><b style="color:var(--ink)">${fmtN(Lib.filtered(all).length)}</b> of ${fmtN(all.length)} songs match. <button class="btn sm ghost" data-act="fReset">Clear filters</button> <button class="btn sm ghost" data-act="forgetRecent">Forget recent songs</button></p>
       <p class="mute"><small>Choose which sources are switched on from the <a href="/play">Play page</a>.</small></p>`;
+  },
+  genresHTML() {
+    const st = Lib.genreStatus();
+    return `<p style="margin:0 0 10px">${st.total ? `<b>${fmtN(st.known)}</b> of ${fmtN(st.total)} artists in your switched-on songs have a genre.` : 'Switch on some songs on the Play page first.'}
+        ${st.todo ? ` ${fmtN(st.todo)} still to look up${st.spotifyTodo ? ` (${fmtN(st.spotifyTodo)} on Spotify)` : ''}.` : st.total ? ' Nothing left to look up.' : ''}</p>
+      <div class="row"><button class="btn sm" data-act="scanGenres" ${st.todo && !this.scanning ? '' : 'disabled'}>${this.scanning ? 'Scanning…' : 'Scan genres'}</button>
+        <button class="btn sm ghost" data-act="forgetGenres" ${this.scanning ? 'disabled' : ''}>Forget and scan again later</button></div>
+      <div id="genProg" class="${this.scanning ? '' : 'hidden'}"><div class="prog"><i></i></div><small class="mute" id="genProgTxt"></small></div>
+      <p class="mute" style="margin:12px 0 0"><small>Used for genre questions, the genre filter above and “similar” wrong options.
+        Genres are saved in this browser, so a scan only looks up artists it hasn’t seen before — new songs, not the whole library again.</small></p>
+      <details class="api-info"><summary>How the lookups count against limits</summary>
+        <p><b>Spotify</b> (only when you’re logged in): genres are read 50 artists per request, so 1,000 artists is about 20 requests.
+          Spotify doesn’t publish a daily cap — its limit counts requests over a rolling 30 seconds, and apps in development mode get a lower one.
+          If you hit it, Spotify says “wait”, and Earworm waits and carries on by itself. Many big bursts in a row can make Spotify block the app for hours, so scan once and let the cache do the rest.
+          Loading songs also counts: about 1 request per 50 liked songs or playlist songs.</p>
+        <p><b>Deezer</b> fills in artists Spotify has no genre for (and works without logging in). It goes through this site’s server, which caches answers and stays under Deezer’s limit of 50 requests per 5 seconds, shared by everyone on the site — a big scan just runs a little slower. There’s no daily limit.</p>
+      </details>`;
   },
   globalHTML() {
     return `
@@ -111,6 +128,7 @@ const SettingsUI = {
         ${item('Volume', rng('volume', 0, 1, 0.05, '%'))}
         ${item('Sound effects', tog('sfx'))}`)}
       ${sec('Which songs', this.filtersHTML())}
+      ${sec('Genres', this.genresHTML())}
       ${sec('Look', `${item('Accent color', `<div class="row">${ACCENTS.map(c => `<button type="button" class="swatch ${S.accent === c ? 'on' : ''}" style="background:${c}" data-act="set" data-set="accent" data-val="${c}" aria-label="Accent ${c}"></button>`).join('')}<input type="color" value="${S.accent}" data-set="accent" aria-label="Custom accent"></div>`)}
         <button class="btn sm ghost" data-act="resetSettings">Reset these settings</button>`)}`;
   },
@@ -131,6 +149,15 @@ const SettingsUI = {
 Object.assign(Act, {
   set(el) { const v = el.dataset.val; setPath(el.dataset.set, /^-?\d+(\.\d+)?$/.test(v) ? +v : v); saveEdit(); SettingsUI.render(); },
   fGenre(el) { const g = el.dataset.g, f = S.filters; f.genres = f.genres.includes(g) ? f.genres.filter(x => x !== g) : [...f.genres, g]; saveS(); SettingsUI.render(); },
+  async scanGenres() {
+    if (SettingsUI.scanning) return;
+    SettingsUI.scanning = true; SettingsUI.render();
+    const prog = (t, f) => { $('#genProg')?.classList.remove('hidden'); const i = $('#genProg i'); if (i) i.style.width = Math.round(clamp(f, 0, 1) * 100) + '%'; const x = $('#genProgTxt'); if (x) x.textContent = t; };
+    try { await Lib.scanGenres(prog); const st = Lib.genreStatus(); toast(`Genres ready: ${fmtN(st.known)} of ${fmtN(st.total)} artists have one.`); }
+    catch (e) { toast(e.message + ' What was found so far is saved — scan again later to continue.', 8000); }
+    SettingsUI.scanning = false; SettingsUI.render();
+  },
+  forgetGenres() { if (!confirm('Forget all saved genres? You’ll need to scan again.')) return; Lib.forgetGenres(); SettingsUI.render(); },
   forgetRecent() { Recent.clear(); toast('Recent songs forgotten — every song is fair game again.'); },
   fReset() { S.filters = clone(DEFAULTS.filters); saveS(); SettingsUI.render(); },
   resetSettings() {

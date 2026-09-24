@@ -30,9 +30,20 @@ function broadOf(t) {
   if (trackBroad.has(t.id)) return trackBroad.get(t.id);
   const set = new Set();
   for (const a of t.artists) for (const g of (Lib.genres[a.id] || [])) { const b = broadOfGenre(g); if (b) set.add(b); }
+  if (!set.size) for (const id of Lib.dzGenres[normArtist(t.artists[0]?.name)] || []) { const b = DZ_GENRES[id]?.[1]; if (b) set.add(b); }
   trackBroad.set(t.id, set); return set;
 }
-function genresOf(t) { return [...new Set(t.artists.flatMap(a => Lib.genres[a.id] || []))]; }
+/* the genre names shown after a genre question: Spotify's tags, or Deezer's genre */
+function genresOf(t) {
+  const sp = [...new Set(t.artists.flatMap(a => Lib.genres[a.id] || []))];
+  return sp.length ? sp : (Lib.dzGenres[normArtist(t.artists[0]?.name)] || []).map(id => DZ_GENRES[id]?.[0]).filter(Boolean);
+}
+/* Deezer genre ids -> [name, broad group] (Deezer's own names come back in the server's language, so they're fixed here) */
+const DZ_GENRES = { 132: ['Pop', 'Pop'], 116: ['Rap/Hip Hop', 'Hip-Hop & Rap'], 152: ['Rock', 'Rock'], 113: ['Dance', 'Electronic'], 165: ['R&B', 'R&B & Soul'],
+  85: ['Alternative', 'Indie & Alternative'], 106: ['Electro', 'Electronic'], 466: ['Folk', 'Country & Folk'], 144: ['Reggae', 'Reggae & Afro'], 129: ['Jazz', 'Jazz & Blues'],
+  98: ['Classical', 'Classical & Soundtrack'], 173: ['Films/Games', 'Classical & Soundtrack'], 464: ['Metal', 'Metal'], 169: ['Soul & Funk', 'R&B & Soul'],
+  2: ['African music', 'Reggae & Afro'], 16: ['Asian music', 'K-Pop & J-Pop'], 153: ['Blues', 'Jazz & Blues'], 75: ['Brazilian music', 'Latin'], 197: ['Latin music', 'Latin'],
+  84: ['Country', 'Country & Folk'], 95: ['Kids', null], 81: ['Indian music', null], 12: ['Arabic music', null] };
 
 /* ---------------- track shapes ---------------- */
 function norm(t, src) {
@@ -165,7 +176,8 @@ const Lib = {
   sets: [],              // [{ key, kind, label, count, at, on, opts }]
   data: new Map(),       // key -> tracks
   playlists: store.get('playlists', []),
-  genres: store.get('genres', {}),
+  genres: store.get('genres', {}),       // Spotify artist id -> Spotify genre tags
+  dzGenres: store.get('dzGenres', {}),   // artist name key -> Deezer genre ids
   opts: Object.assign({ chart: CFG.DEFAULT_CHART, chartGenre: 0, blendArtist: true, blendSimilar: true, blendPer: 6, blendArtists: 30 }, store.get('libOpts', {})),
   _all: null,
   async init() {
@@ -287,19 +299,55 @@ const Lib = {
     if (m.kind === 'chart') return this.loadChart(m.opts);
     if (m.kind === 'blend') return this.buildBlend(prog);
   },
-
-  /* ---- genres (Spotify artist tags) ---- */
-  spotifyArtistIds() { return [...new Set(this.enabled().filter(m => this.isSpotify(m)).flatMap(m => (this.data.get(m.key) || []).map(t => t.artists[0]?.id)).filter(id => id && !id.startsWith('dz')))]; },
-  async scanGenres(prog) {
-    const ids = this.spotifyArtistIds().filter(id => !(id in this.genres));
-    let done = 0;
-    await pool(ids, 4, async id => {
-      try { const a = await sp('/artists/' + id); this.genres[id] = a?.genres || []; }
-      catch (e) { if (/quota|rate limit/i.test(e.message)) throw e; this.genres[id] = []; }
-      done++; prog(done, ids.length); if (done % 40 === 0) store.set('genres', this.genres);
-    }).finally(() => { store.set('genres', this.genres); trackBroad.clear(); });
+  /* ---- genres: Spotify artist tags first, Deezer album genres for the rest. Both are kept in this browser
+     (localStorage "genres" and "dzGenres"), so a scan only ever looks up artists it hasn't seen before. ---- */
+  spotifyArtistIds() { return [...new Set(this.all().map(t => t.artists[0]?.id).filter(id => id && !id.startsWith('dz')))]; },
+  /* one track per artist, for artists in the songs that are switched on */
+  artistReps() { const m = new Map(); for (const t of this.all()) { const k = normArtist(t.artists[0]?.name); if (k && !m.has(k)) m.set(k, t); } return [...m.entries()]; },
+  genreStatus() {
+    const reps = this.artistReps();
+    const known = reps.filter(([, t]) => broadOf(t).size).length;
+    const spotifyTodo = Auth.tok ? this.spotifyArtistIds().filter(id => !(id in this.genres)).length : 0;
+    const deezerTodo = reps.filter(([k, t]) => !broadOf(t).size && !(k in this.dzGenres)).length;
+    return { total: reps.length, known, spotifyTodo, deezerTodo, todo: spotifyTodo + deezerTodo };
   },
-  genreCoverage() { const ids = this.spotifyArtistIds(); return { total: ids.length, done: ids.filter(id => id in this.genres).length }; },
+  async scanGenres(prog) {
+    // 1. Spotify, 50 artists per request (falls back to one at a time if the batch endpoint isn't available to this app)
+    if (Auth.tok) {
+      const ids = this.spotifyArtistIds().filter(id => !(id in this.genres));
+      let done = 0, batch = true;
+      try {
+        for (let i = 0; i < ids.length; i += 50) {
+          const chunk = ids.slice(i, i + 50);
+          if (batch) {
+            try { const j = await sp('/artists?ids=' + chunk.join(',')); for (const a of j?.artists || []) if (a?.id) this.genres[a.id] = a.genres || []; }
+            catch (e) { if (/quota|rate limit/i.test(e.message)) throw e; batch = false; }
+          }
+          if (!batch) await pool(chunk, 3, async id => {
+            try { const a = await sp('/artists/' + id); this.genres[id] = a?.genres || []; }
+            catch (e) { if (/quota|rate limit/i.test(e.message)) throw e; this.genres[id] = []; }
+          });
+          for (const id of chunk) if (!(id in this.genres)) this.genres[id] = [];
+          done += chunk.length; prog(`Spotify: ${fmtN(done)} of ${fmtN(ids.length)} artists`, done / ids.length * 0.5);
+          store.set('genres', this.genres);
+        }
+      } finally { store.set('genres', this.genres); trackBroad.clear(); }
+    }
+    // 2. Deezer for every artist that still has no usable genre (also covers charts and people who aren't logged in)
+    const todo = this.artistReps().filter(([k, t]) => !broadOf(t).size && !(k in this.dzGenres));
+    let done = 0;
+    await pool(todo, 3, async ([k, t]) => {
+      try {
+        const id = await Dz.artistId(t);
+        const count = new Map();
+        for (const al of id ? await Dz.albums(id) : []) if (al.genre_id > 0) count.set(al.genre_id, (count.get(al.genre_id) || 0) + (al.record_type === 'album' ? 2 : 1));
+        this.dzGenres[k] = [...count.entries()].sort((a, b) => b[1] - a[1]).slice(0, 2).map(e => e[0]);
+      } catch (e) { if (e.status === 429 || e.status === 503) throw e; this.dzGenres[k] = []; }
+      done++; prog(`Deezer: ${fmtN(done)} of ${fmtN(todo.length)} artists`, 0.5 + done / Math.max(1, todo.length) * 0.5);
+      if (done % 25 === 0) store.set('dzGenres', this.dzGenres);
+    }).finally(() => { store.set('dzGenres', this.dzGenres); trackBroad.clear(); });
+  },
+  forgetGenres() { this.genres = {}; this.dzGenres = {}; store.del('genres'); store.del('dzGenres'); trackBroad.clear(); },
 
   sourceLabel(k) { return this.get(k)?.label || (k.startsWith('mp:') ? 'A friend’s songs' : 'Songs'); },
   filtered(list = this.all()) {

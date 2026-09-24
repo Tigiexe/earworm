@@ -204,7 +204,7 @@ const Auth = {
   /* sign out of Spotify but keep the songs already loaded (used when switching Spotify apps) */
   forget() { this.tok = null; Me = null; store.del('token'); store.del('me'); },
   logout() {
-    this.tok = null; Me = null; store.del('token'); store.del('me'); store.del('playlists'); store.del('genres'); store.del('likedNow');
+    this.tok = null; Me = null; store.del('token'); store.del('me'); store.del('playlists'); store.del('likedNow');
     const sets = store.get('sets', []), personal = m => ['liked', 'top', 'pl', 'blend'].includes(m.kind);
     for (const m of sets.filter(personal)) DB.del('set:' + m.key);
     store.set('sets', sets.filter(m => !personal(m)));
