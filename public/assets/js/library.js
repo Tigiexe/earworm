@@ -280,7 +280,21 @@ const Catalog = {
 const Liked = {
   saved: new Set(store.get('likedNow', [])),
   can() { return !!Auth.tok; },
-  isLiked(t) { return !!t && (this.saved.has(t.id) || (t.src || []).includes('liked')); },
+  /* is this song in *this* player's liked songs? (a song's source tags travel with it in multiplayer, so they can't be used) */
+  isLiked(t) {
+    if (!t) return false;
+    if (this.saved.has(t.id)) return true;
+    const m = this.mine();
+    return (!!t.uri && m.uris.has(t.uri)) || m.keys.has(trackKey(t));
+  },
+  mine() {
+    const list = Lib.data.get('liked') || [];
+    if (this._list !== list) {   // the keys include romanized names, since songs may be shown under those
+      this._list = list;
+      this._mine = { uris: new Set(list.map(x => x.uri).filter(Boolean)), keys: new Set(list.flatMap(x => [trackKey(x), trackKey(romanView(x))])) };
+    }
+    return this._mine;
+  },
   async spotifyUri(t) {
     if (t.uri) return t.uri;
     let q = t.isrc ? `isrc:${t.isrc}` : `track:"${cleanTitle(t.name)}" artist:"${t.artists[0]?.name || ''}"`;
