@@ -105,7 +105,8 @@ const Player = {
         const dur = (t.dur || 180000) / 1000;
         const start = opts.start ?? this.computeStart(opts.frac ?? 0, opts.need || 15, dur);
         this.sdk.setVolume(S.volume).catch(() => {});
-        await this.sdkPlay(t.uri, start * 1000, my);
+        // Spotify's requests can stall (or wait out rate limits); never let that hold a question up for long
+        await Promise.race([this.sdkPlay(t.uri, start * 1000, my), sleep(7000).then(() => { throw new Error('Spotify took too long to start the song'); })]);
         if (my !== this.token) return { ok: false, superseded: true };
         this.sdkErrors = 0;
         this.schedStop(opts.len, my); return { ok: true, start };

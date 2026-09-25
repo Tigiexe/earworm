@@ -197,18 +197,29 @@ const QUI = {
   async begin(ctx) {
     const q = ctx.q;
     let r = null;
-    if (q.type === 'heardle') r = await this.playStage(ctx, true);
-    else if (q.audio) {
-      r = await Player.play(q.track, { frac: q.startFrac, len: q.clipLength || 0, need: Math.max(ctx.opt.limit || 15, q.clipLength || 0), preview: !!q.previewOnly });
+    if (q.type === 'heardle' || q.audio) {
+      // if starting the audio takes more than 9 s, start the question anyway and offer a play button
+      const playing = q.type === 'heardle' ? this.playStage(ctx, true)
+        : Player.play(q.track, { frac: q.startFrac, len: q.clipLength || 0, need: Math.max(ctx.opt.limit || 15, q.clipLength || 0), preview: !!q.previewOnly });
+      r = await Promise.race([playing, sleep(9000).then(() => ({ ok: false, slow: true }))]);
       if (ctx.done) return;
-      ctx.startSec = r.start;
+      if (r.slow) playing.then(x => { if (x?.ok && !ctx.done) { ctx.startSec = x.start; $('#vinyl')?.classList.add('spin'); $('#tapPlay')?.remove(); ctx.opt.onAudio?.('ok'); } });
+      if (q.type !== 'heardle') ctx.startSec = r.start;
       if (r.ok) $('#vinyl')?.classList.add('spin');
     }
     if (ctx.done) return;
     // the song wouldn't play: let the game swap in a different one instead of asking about silence
     if (r && r.unplayable && !r.superseded && ctx.opt.reroll) return ctx.finish({ aborted: true, unplayable: true, correct: false, points: 0, factor: 0 });
-    if (r && !r.ok && !r.superseded) toast(r.blocked ? 'Your browser blocked audio. Tap “Replay clip” to start it.' : r.offline ? 'Can’t reach the Earworm server.' : 'Couldn’t play this clip. Answer anyway, or tap “Replay clip”.');
+    if (r && !r.ok && !r.superseded) {
+      this.tapToPlay(ctx, r.blocked ? 'Your browser blocked the sound — tap to hear the song' : r.slow ? 'The song is slow to start — tap to try again' : r.offline ? 'Can’t reach the Earworm server — tap to try again' : 'Couldn’t play the clip — tap to try again');
+      ctx.opt.onAudio?.(r.blocked ? 'blocked' : r.slow ? 'slow' : 'failed');
+    } else if (r?.ok) ctx.opt.onAudio?.('ok');
     this.startTimer(ctx);
+  },
+  /* a big play button when the audio didn't start by itself (a tap always counts as permission to play) */
+  tapToPlay(ctx, label) {
+    if ($('#tapPlay')) return;
+    $('#qAns')?.insertAdjacentHTML('afterbegin', `<button class="btn primary big tap-play" id="tapPlay" data-q="${ctx.q.type === 'heardle' ? 'play' : 'replay'}" data-keep="1">▶ ${esc(label)}</button>`);
   },
   startTimer(ctx) {
     if (ctx.done) return;
@@ -266,8 +277,11 @@ const QUI = {
   },
   async replay(ctx) {
     const q = ctx.q; if (!q.audio || ctx.waiting) return;
-    const r = await Player.play(q.track, { start: ctx.startSec, frac: q.startFrac, len: q.clipLength || 0, need: ctx.opt.limit || 15, preview: !!q.previewOnly });
-    if (r.ok) { ctx.startSec = r.start; $('#vinyl')?.classList.add('spin'); }
+    Player.unlock();
+    // a manual retry always uses the preview: it's the dependable one
+    const r = await Player.play(q.track, { start: ctx.startSec, frac: q.startFrac, len: q.clipLength || 0, need: ctx.opt.limit || 15, preview: !!q.previewOnly || !!$('#tapPlay') });
+    if (r.ok) { ctx.startSec = r.start; $('#vinyl')?.classList.add('spin'); $('#tapPlay')?.remove(); ctx.opt.onAudio?.('ok'); }
+    else if (!r.superseded) toast(r.blocked ? 'Still blocked — check the browser isn’t muting this site.' : 'That clip won’t play right now.');
   },
   submitText(ctx) {
     const v = $('#qInput')?.value || ''; if (!v.trim()) return;
@@ -373,7 +387,7 @@ const QUI = {
   async playStage(ctx, first = false) {
     const q = ctx.q;
     const r = await Player.play(q.track, { start: ctx.startSec, frac: q.startFrac, len: q.stages[ctx.stage], need: 17, preview: !!q.previewOnly });
-    if (r.ok) { ctx.startSec = r.start; const v = $('#vinyl'); v?.classList.add('spin'); ctx.timers.push(setTimeout(() => v?.classList.remove('spin'), q.stages[ctx.stage] * 1000)); }
+    if (r.ok) { ctx.startSec = r.start; const v = $('#vinyl'); v?.classList.add('spin'); $('#tapPlay')?.remove(); ctx.timers.push(setTimeout(() => v?.classList.remove('spin'), q.stages[ctx.stage] * 1000)); }
     else if (!first && !r.superseded && !ctx.done) toast(r.blocked ? 'Tap Play to start the audio.' : 'Couldn’t play this clip.');
     return r;
   },

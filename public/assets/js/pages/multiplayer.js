@@ -53,6 +53,7 @@ const MP = {
   mode: 'classic', from: {}, shown: {}, state: 'idle', round: 0,
   coop: false, coopRetry: false, team: null, teamScore: null,   // co-op: one shared answer and score for everyone
   exact: false,                                                 // song shares hit exactly instead of at random
+  fullSongs: false,                                             // allow Spotify full songs when every player has Premium
   banned: new Set(),                                            // browser tabs the host removed from this game
   ready: new Set(), started: false, readyTimer: null,           // each round starts only when everyone has the song loaded total: 0, answers: {}, curQ: null, curLimit: 0, roundTimer: null, names: {}, lobby: null, myName: '', myHist: [],
   open(joinCode) {
@@ -78,7 +79,7 @@ const MP = {
   pub() {
     const shares = this.shares();
     return Object.values(this.players).map(p => ({ id: p.id, name: p.name, ci: p.ci, score: p.score, count: p.count, share: p.share, pct: shares[p.id] || 0, connected: p.connected,
-      answered: !!this.answers[p.id], ready: this.ready.has(p.id), streak: p.streak, correct: p.correct, from: this.from[p.name] || 0 }));
+      answered: !!this.answers[p.id], ready: this.ready.has(p.id), audio: p.audio || '', streak: p.streak, correct: p.correct, from: this.from[p.name] || 0 }));
   },
   /* each player's percentage of the songs, from the host's share sliders (players without songs, or who left, get 0) */
   shares() {
@@ -154,6 +155,8 @@ const MP = {
         }
       }
       this.lobbyChanged();
+    } else if (d.t === 'audio') {
+      if (d.round === this.round) this.onAudio(id, String(d.state || ''));
     } else if (d.t === 'ready') {
       if (d.round === this.round && d.qid === this.curQ?.id) this.onReady(id, d.sdk === true);
     } else if (d.t === 'answer') {
@@ -199,6 +202,7 @@ const MP = {
           ${withSongs.length ? `<div class="mix-box"><h3>Whose songs get played</h3>
             <div class="mix-bar">${withSongs.map(p => `<i data-id="${esc(p.id)}" style="--pc:${playerColor(p.name)};width:${p.pct}%" title="${esc(p.name)} ${p.pct}%"></i>`).join('')}</div>
             <div class="mix-legend">${withSongs.map(p => `<span><i style="background:${playerColor(p.name)}"></i>${esc(p.name)} <b class="num" data-pct="${esc(p.id)}">${p.pct}%</b></span>`).join('')}</div>
+            ${isHost ? `<label class="chk"><input type="checkbox" data-act="mpFull" ${this.fullSongs ? 'checked' : ''}> Full songs when everyone has Spotify Premium <small class="mute">(otherwise everyone hears the same 30-second preview — the most reliable)</small></label>` : ''}
             ${isHost && withSongs.length > 1 ? `<label class="chk"><input type="checkbox" data-act="mpExact" ${this.exact ? 'checked' : ''}> Exact split — e.g. 50/50 means every other song, not a coin flip each time</label>
               <div class="row" style="margin-top:8px"><button class="btn sm ghost" data-act="mpShareEven">Same for everyone</button><button class="btn sm ghost" data-act="mpShareSize">By number of songs</button></div>
               <p class="mute" style="margin:6px 0 0"><small>Drag someone’s slider to 0 to leave their songs out.</small></p>` : ''}</div>` : ''}
@@ -251,7 +255,8 @@ const MP = {
     if (!reroll) this.round++;
     this.answers = {}; this.curQ = q; this.state = 'question'; this.started = false; this.ready = new Set();
     // everyone hears the same thing: full songs only when every player has Spotify Premium working, otherwise the 30 s preview
-    q.previewOnly = !Object.values(this.players).filter(p => p.connected).every(p => p.id === 'host' ? Player.mode() === 'sdk' : p.sdk);
+    q.previewOnly = !this.fullSongs || !Object.values(this.players).filter(p => p.connected).every(p => p.id === 'host' ? Player.mode() === 'sdk' : p.sdk);
+    for (const p of Object.values(this.players)) p.audio = '';
     const limit = this.curLimit = limitFor(q, true);
     this.broadcast({ t: 'q', round: this.round, total: this.total, q, limit });
     this.renderBoard(this.pub());
@@ -263,7 +268,7 @@ const MP = {
   async prep(q, round) {
     this.hud(round); Reveal.clear();
     $('#qArea').innerHTML = '<div class="loading">Loading the song for everyone…</div>';
-    if (q.audio && q.track) await Player.preload(q.track, { preview: !!q.previewOnly }).catch(() => false);
+    if (q.audio && q.track) await Promise.race([Player.preload(q.track, { preview: !!q.previewOnly }).catch(() => false), sleep(8000)]);
     if (round !== this.round || q !== this.curQ || this.started) return;
     if (this.host) this.onReady('host', Player.mode() === 'sdk');
     else this.up({ t: 'ready', round, qid: q.id, sdk: Player.mode() === 'sdk' });
@@ -273,6 +278,12 @@ const MP = {
     this.ready.add(pid); this.players[pid].sdk = sdk;
     const pub = this.pub(); this.broadcast({ t: 'answered', players: pub }); this.renderBoard(pub);
     this.checkReady();
+  },
+  onAudio(pid, state) {
+    const p = this.players[pid]; if (!p) return;
+    const v = ['blocked', 'slow', 'failed'].includes(state) ? state : '';
+    if (p.audio === v) return;
+    p.audio = v; const pub = this.pub(); this.broadcast({ t: 'answered', players: pub }); this.renderBoard(pub);
   },
   checkReady() {
     const need = Object.values(this.players).filter(p => p.connected);
@@ -299,7 +310,9 @@ const MP = {
   async playLocal(q, limit, round, pause = S.readyPause) {
     this.hud(round);
     Reveal.clear();
-    const res = await QUI.run(q, { limit, names: this.names, roundLabel: round, pause, reroll: this.host && (this.rerolls || 0) < 3, onShown: this.host ? x => Engine.shown(x) : null });
+    // tell the host when this player's audio didn't start (shown on the scoreboard)
+    const onAudio = state => { if (this.host) this.onAudio('host', state); else this.up({ t: 'audio', round, state }); };
+    const res = await QUI.run(q, { limit, names: this.names, roundLabel: round, pause, onAudio, reroll: this.host && (this.rerolls || 0) < 3, onShown: this.host ? x => Engine.shown(x) : null });
     if (!this.active || round !== this.round || q !== this.curQ) return;
     if (res.unplayable && this.host) { this.rerolls = (this.rerolls || 0) + 1; Engine.markBad(q.track); toast('That song wouldn’t play — picking another.', 2500); return this.hostNext(true); }
     this.rerolls = 0;
@@ -518,7 +531,10 @@ const MP = {
   },
   /* ⏳ still loading the song · … thinking · ✓ answered */
   statusIcon(p) {
-    if (p.answered) return '<span class="st done" title="Answered">✓</span>';
+    const why = { blocked: 'their browser blocked the sound', slow: 'the song is slow to start for them', failed: 'the song won’t play for them' }[p.audio];
+    const mute = why ? `<span class="st warn" title="No sound: ${why}">🔇</span>` : '';
+    if (p.answered) return mute + '<span class="st done" title="Answered">✓</span>';
+    if (why) return mute;
     if (!this.started && !p.ready) return '<span class="st load" title="Loading the song">⏳</span>';
     return '<span class="st" title="Thinking">…</span>';
   },
@@ -598,6 +614,7 @@ Object.assign(Act, {
   mpRetry(el) { MP.coopRetry = el.checked; MP.lobbyChanged(); },
   mpExact(el) { MP.exact = el.checked; MP.lobbyChanged(); },
   mpStartAnyway() { MP.go(); },
+  mpFull(el) { MP.fullSongs = el.checked; MP.lobbyChanged(); },
   mpKick(el) { const p = MP.players[el.dataset.id]; if (p && confirm(`Remove ${p.name} from the game?`)) MP.kick(p.id); },
   mpSettings() { SettingsUI.open('modal', MP.mode, { mp: true, onClose: () => { if (MP.host && MP.state === 'lobby') MP.lobbyChanged(); } }); },
   quit() { Act.mpLeave(); }
