@@ -244,7 +244,8 @@ const MP = {
     const limit = this.curLimit = limitFor(q, true);
     this.broadcast({ t: 'q', round: this.round, total: this.total, q, limit });
     this.renderBoard(this.pub());
-    clearTimeout(this.readyTimer); this.readyTimer = setTimeout(() => this.go(), 8000);   // nobody waits more than 8 s for a slow player
+    // the round waits for everyone, so all start together; after a while the host may start without a stuck player
+    clearTimeout(this.readyTimer); this.readyTimer = setTimeout(() => this.showWaiting(), 10000);
     this.prep(q, this.round);
   },
   /* load the song, then tell the host this player is ready */
@@ -262,7 +263,18 @@ const MP = {
     const pub = this.pub(); this.broadcast({ t: 'answered', players: pub }); this.renderBoard(pub);
     this.checkReady();
   },
-  checkReady() { const need = Object.values(this.players).filter(p => p.connected); if (need.every(p => this.ready.has(p.id))) this.go(); },
+  checkReady() {
+    const need = Object.values(this.players).filter(p => p.connected);
+    if (need.every(p => this.ready.has(p.id))) this.go(); else if ($('#waitBox')) this.showWaiting();
+  },
+  /* host only: who the round is still waiting for, with a way to go on without them */
+  showWaiting() {
+    if (!this.host || this.state !== 'question' || this.started) return;
+    const late = Object.values(this.players).filter(p => p.connected && !this.ready.has(p.id));
+    if (!late.length) return this.go();
+    $('#qArea').innerHTML = `<div class="loading" id="waitBox"><p>Waiting for ${late.map(p => `<b style="color:var(--ink)">${esc(p.name)}</b>`).join(', ')} to load the song…</p>
+      <p><small>Everyone starts together, so nobody hears it first.</small></p><button class="btn" data-act="mpStartAnyway">Start without ${late.length > 1 ? 'them' : esc(late[0].name)}</button></div>`;
+  },
   /* start the round for everyone at the same moment, with the host's break length */
   go() {
     if (this.state !== 'question' || this.started) return;
@@ -569,6 +581,7 @@ Object.assign(Act, {
   mpStyle(el) { MP.coop = el.dataset.v === 'coop'; MP.lobbyChanged(); },
   mpRetry(el) { MP.coopRetry = el.checked; MP.lobbyChanged(); },
   mpExact(el) { MP.exact = el.checked; MP.lobbyChanged(); },
+  mpStartAnyway() { MP.go(); },
   mpSettings() { SettingsUI.open('modal', MP.mode, { mp: true, onClose: () => { if (MP.host && MP.state === 'lobby') MP.lobbyChanged(); } }); },
   quit() { Act.mpLeave(); }
 });
