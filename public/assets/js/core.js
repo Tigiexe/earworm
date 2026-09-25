@@ -324,7 +324,7 @@ const Header = {
     const links = [['play', 'Play', 'play'], ['multiplayer', 'Friends', 'mp'], ['settings', 'Settings', 'settings']];
     const av = Me?.images?.length ? `<img src="${esc(Me.images[Me.images.length - 1].url)}" alt="">` : `<span class="av">${esc(((Me?.display_name) || 'G')[0].toUpperCase())}</span>`;
     h.innerHTML = `<a class="brand" href="${SITE_DIR}play"><span class="brand-disc"></span>Earworm</a>
-      <nav class="nav">${links.map(([href, label, key]) => `<a href="${SITE_DIR}${href}" class="${active === key ? 'on' : ''}">${label}</a>`).join('')}</nav>
+      <nav class="nav">${links.map(([href, label, key]) => `<a href="${SITE_DIR}${href}" class="${active === key ? 'on' : ''}" ${key === 'settings' ? 'data-act="openSettings"' : ''}>${label}</a>`).join('')}</nav>
       <div class="top-r"><span id="audioBadge" class="badge hidden"></span>
         <div class="vol"><button class="vol-ic" data-act="mute" aria-label="Mute or unmute" title="Mute / unmute">${volIcon(S.volume)}</button><input type="range" id="hdrVol" min="0" max="1" step="0.01" value="${S.volume}" aria-label="Volume" title="Volume"></div>
         <div class="menu"><button class="user" data-act="menu" aria-haspopup="true">${av}<span class="uname">${esc(Me?.display_name || 'Guest')}</span></button>
@@ -339,7 +339,10 @@ document.addEventListener('click', e => {
   const pop = $('#menuPop');
   if (pop && !e.target.closest('.menu')) pop.classList.add('hidden');
 });
-document.addEventListener('keydown', e => { if (e.key === 'Escape' && Modal.isOpen()) Modal.close(); });
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  if (Modal.isOpen()) Modal.close(); else if (typeof SettingsUI !== 'undefined' && SettingsUI.drawerOpen()) SettingsUI.closeDrawer();
+});
 
 /* volume: the header slider, the Settings slider and the player all follow S.volume */
 const volIcon = v => v <= 0 ? '🔇' : v < 0.35 ? '🔈' : v < 0.7 ? '🔉' : '🔊';
@@ -363,6 +366,13 @@ const Act = {
   login() { if (!clientId()) return go(''); Auth.login().catch(e => toast(e.message)); },
   logout() { Auth.logout(); go(''); },
   closeModal() { Modal.close(); },
+  /* Settings opens as a side panel over the current page (so a game keeps running); Ctrl/Cmd-click opens the page */
+  openSettings(el, e) {
+    if (e?.ctrlKey || e?.metaKey || e?.shiftKey) return window.open(SITE_DIR + 'settings', '_blank');
+    if (typeof SettingsUI === 'undefined' || location.pathname === '/settings') return go('settings');
+    SettingsUI.openDrawer();
+  },
+  closeDrawer() { SettingsUI.closeDrawer(); },
   mute() { setVolume(S.volume > 0 ? 0 : (S.lastVolume || 0.2), true); }
 };
 document.addEventListener('click', e => {

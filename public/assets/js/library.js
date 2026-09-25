@@ -337,6 +337,7 @@ const Lib = {
     sets.forEach((m, i) => { if (Array.isArray(lists[i]) && lists[i].length) { this.sets.push(m); this.data.set(m.key, lists[i]); } });
     if (this.sets.length !== sets.length) this.saveMeta();
     this.changed();
+    this.ready = true;
     for (const m of this.sets) if ((this.data.get(m.key) || []).some(t => Romanize.needs(t) && !t.rom && !((t.isrc || trackKey(t)) in Romanize.cache))) Romanize.schedule(m.key);
     return this;
   },

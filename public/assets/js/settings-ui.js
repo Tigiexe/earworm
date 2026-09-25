@@ -153,6 +153,33 @@ const SettingsUI = {
         <button class="btn sm ghost" data-act="resetSettings">Reset these settings</button>`)}`;
   },
 
+  /* the settings side panel: opens over any page, remembers whatever settings panel was open before */
+  async openDrawer() {
+    if (this.drawerOpen()) return;
+    if (!Lib.ready) await Lib.init();   // pages like Results don't load the song list themselves
+    this.prev = { target: this.target, mode: this.mode, mp: this.mp, onChange: this.onChange, onClose: this.onClose };
+    let d = $('#drawer');
+    if (!d) {
+      document.body.insertAdjacentHTML('beforeend', `<div id="drawer" class="drawer"><div class="drawer-bg" data-act="closeDrawer"></div>
+        <aside class="drawer-panel" role="dialog" aria-modal="true" aria-label="Settings"><div class="drawer-head"><h2>Settings</h2><button class="btn sm ghost" data-act="closeDrawer">Close</button></div>
+          <p class="mute" style="margin:0 0 6px"><small>Changes apply right away. Rules like songs per game or time per song belong to each game mode — they’re on the mode’s start screen.</small></p>
+          <div id="drawerBody" class="settings-page"></div></aside></div>`);
+      d = $('#drawer');
+    }
+    this.open($('#drawerBody'), null);
+    void d.offsetWidth; d.classList.add('open');   // reflow first, so it slides in
+    document.body.classList.add('drawer-on');
+  },
+  closeDrawer() {
+    const d = $('#drawer'); if (!d?.classList.contains('open')) return;
+    d.classList.remove('open'); document.body.classList.remove('drawer-on');
+    const p = this.prev; this.prev = null;
+    // put back the panel that was open underneath (e.g. a game mode's settings), or nothing
+    if (p?.target && p.target !== 'modal' && document.contains(p.target)) this.open(p.target, p.mode, p);
+    else { this.target = null; this.mode = null; this.close(); }
+    setTimeout(() => { if (!d.classList.contains('open')) $('#drawerBody').innerHTML = ''; }, 300);
+  },
+  drawerOpen() { return !!$('#drawer.open'); },
   render() {
     const html = this.mode ? this.modeHTML() : this.globalHTML();
     if (this.target === 'modal') {

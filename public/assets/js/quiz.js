@@ -269,6 +269,7 @@ const QUI = {
   },
   key(ctx, e) {
     if (ctx.locked || e.metaKey || e.ctrlKey || e.altKey || e.target.matches('input, textarea, select')) return;
+    if (document.body.classList.contains('drawer-on') || Modal.isOpen()) return;   // keys belong to the settings panel then
     const q = ctx.q;
     if (/^[1-9]$/.test(e.key) && q.format === 'choice') { const btn = $(`#qArea [data-i="${+e.key - 1}"]`); if (btn && !btn.disabled && !btn.classList.contains('gone')) { e.preventDefault(); btn.click(); } }
     else if (q.tf && (e.key === 't' || e.key === 'f')) { e.preventDefault(); this.answer(ctx, e.key === 't' ? 0 : 1); }
