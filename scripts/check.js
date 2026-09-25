@@ -52,7 +52,15 @@ for (let r = 0; r < 40; r++) { Engine.setup(three, { groupBy: t => t.owners, wei
 ok(got.Ana > 830 && got.Ana < 960 && got.Bob > 35 && got.Bob < 120 && got.Cid < 60, `shares 90/7/3 gave ${got.Ana}/${got.Bob}/${got.Cid} of 1000 picks`);
 Engine.setup(three, { groupBy: t => t.owners, weights: { Ana: 100, Bob: 0, Cid: 0 } });
 ok(Array.from({ length: 50 }, () => Engine.pickTrack().owners[0]).every(o => o === 'Ana'), 'a share of 0 leaves that player out');
-// 8: preview expiry parsing
+// 8: exact split: 90/7/3 over 100 songs is exactly 90/7/3, and 50/50 alternates
+const ex = { Ana: 0, Bob: 0, Cid: 0 };
+Engine.setup(three, { groupBy: t => t.owners, weights: { Ana: 90, Bob: 7, Cid: 3 }, exact: true });
+for (let k = 0; k < 100; k++) ex[Engine.pickTrack().owners[0]]++;
+ok(ex.Ana === 90 && ex.Bob === 7 && ex.Cid === 3, `exact split 90/7/3 gave ${ex.Ana}/${ex.Bob}/${ex.Cid} of 100`);
+Engine.setup(three.filter(t => t.owners[0] !== 'Cid'), { groupBy: t => t.owners, weights: { Ana: 50, Bob: 50 }, exact: true });
+const seq = Array.from({ length: 10 }, () => Engine.pickTrack().owners[0]);
+ok(seq.filter(o => o === 'Ana').length === 5 && seq.every((o, i) => i % 2 === 0 || o !== seq[i - 1]), 'exact 50/50 alternates: ' + seq.map(o => o[0]).join(''));
+// 9: preview expiry parsing
 const P = ctx.T.Player, soon = Math.floor(Date.now() / 1000) + 30, later = soon + 3600;
 ok(!P.fresh('https://c/x.mp3?hdnea=exp=' + soon + '~acl') && P.fresh('https://c/x.mp3?hdnea=exp=' + later + '~acl') && P.fresh('https://itunes/x.m4a'), 'preview links are refreshed before they expire');
 process.exit(fails ? 1 : 0);

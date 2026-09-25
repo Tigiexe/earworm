@@ -110,6 +110,7 @@ const SettingsUI = {
       ${item('Genres', genres.length ? `<div class="chips">${genres.map(([g, c]) => `<button type="button" class="chip ${f.genres.includes(g) ? 'on' : ''}" data-act="fGenre" data-g="${esc(g)}">${esc(g)} <small>${c}</small></button>`).join('')}</div>` : `<small class="mute">No genres yet — scan them in Genres below.</small>`)}
       ${item('Only this artist', `<select class="field" data-set="filters.artist"><option value="">Any artist</option>${artists.map(([a, c]) => `<option value="${esc(a)}" ${f.artist === a ? 'selected' : ''}>${esc(a)} (${c})</option>`).join('')}</select>`)}
       ${item('Balance between sources', seg('mixMode', [['even', 'Even'], ['size', 'By number of songs']]), true, 'Even: each source you switched on (liked songs, a chart, a friend…) comes up equally often, however big it is')}
+      ${item('Exact split', tog('exactSplit'), true, 'Hit the balance exactly — e.g. with two sources, 5 of every 10 songs from each — instead of picking at random with those odds')}
       ${item('Avoid songs from recent games', tog('avoidRecent'), true, 'Only when there are enough other songs — small song lists still work')}
       ${item('How many games back', rng('recentGames', 1, 15, 1, ' games'), S.avoidRecent)}
       ${item('Skip explicit songs', tog('filters.noExplicit'))}

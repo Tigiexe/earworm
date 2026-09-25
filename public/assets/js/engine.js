@@ -147,6 +147,7 @@ const Engine = {
      opts.needPreview for multiplayer */
   setup(pool, opts = {}) {
     this.pool = pool; this.opts = opts; this.used = new Set(); this.bad = new Set(); this.lastArtists = [];
+    this.picked = {}; this.chosenGroup = null; this.exact = opts.exact ?? S.exactSplit;
     this.keys = new Map(pool.map(t => [t.id, trackKey(t)])); this.poolKeys = new Set(this.keys.values());
     const by = opts.groupBy || (t => t.src || []), groups = new Map();
     for (const t of pool) for (const g of (by(t)?.length ? by(t) : ['?'])) { if (!groups.has(g)) groups.set(g, []); groups.get(g).push(t); }
@@ -164,19 +165,30 @@ const Engine = {
   },
   key(t) { return this.keys.get(t.id) || trackKey(t); },
   avail(t) { return !this.used.has(this.key(t)) && !this.bad.has(t.id); },
-  take(t) { this.used.add(this.key(t)); this.lastArtists = [normArtist(t.artists[0]?.name), ...this.lastArtists].slice(0, 2); return t; },
+  take(t) {
+    if (this.chosenGroup != null) { this.picked[this.chosenGroup] = (this.picked[this.chosenGroup] || 0) + 1; this.chosenGroup = null; }
+    this.used.add(this.key(t)); this.lastArtists = [normArtist(t.artists[0]?.name), ...this.lastArtists].slice(0, 2); return t; },
   /* one random song. With weights (multiplayer shares) each group gets its share of the picks;
      in "even" mode every source (liked songs, a chart…) gets an equal chance; in "size" mode every song does */
   pickFrom(ok) {
-    const W = this.opts.weights;
-    if (!W && (S.mixMode === 'size' || this.groups.length < 2)) { const c = this.pool.filter(ok); return c.length ? pick(c) : null; }
-    const cands = this.groups.map(g => ({ w: W ? Math.max(0, W[g.key] || 0) : 1, c: g.tracks.filter(ok) })).filter(x => x.c.length);
+    const W = this.opts.weights, size = S.mixMode === 'size';
+    this.chosenGroup = null;
+    if (this.groups.length < 2 || (!W && size && !this.exact)) { const c = this.pool.filter(ok); return c.length ? pick(c) : null; }
+    const weight = g => W ? Math.max(0, W[g.key] || 0) : size ? g.tracks.length : 1;
+    const cands = this.groups.map(g => ({ key: g.key, w: weight(g), c: g.tracks.filter(ok) })).filter(x => x.c.length);
     if (!cands.length) return null;
+    if (this.exact) {
+      // exact split: take from whichever group is furthest behind its share so far (ties at random)
+      const total = this.groups.reduce((a, g) => a + weight(g), 0) || 1, n = Object.values(this.picked).reduce((a, b) => a + b, 0) + 1;
+      const behind = x => x.w / total * n - (this.picked[x.key] || 0);
+      const best = shuffle(cands.filter(x => x.w > 0)).sort((a, b) => behind(b) - behind(a))[0] || pick(cands);
+      this.chosenGroup = best.key; return pick(best.c);
+    }
     const total = cands.reduce((a, x) => a + x.w, 0);
     if (total <= 0) return pick(pick(cands).c);   // only zero-share groups have songs left
     let r = Math.random() * total;
-    for (const x of cands) { r -= x.w; if (r <= 0 && x.w > 0) return pick(x.c); }
-    return pick(cands.filter(x => x.w > 0).pop().c);
+    for (const x of cands) { r -= x.w; if (r <= 0 && x.w > 0) { this.chosenGroup = x.key; return pick(x.c); } }
+    const last = cands.filter(x => x.w > 0).pop(); this.chosenGroup = last.key; return pick(last.c);
   },
   /* Never repeats a song within a game until every song has been used. Prefers songs that weren't in your
      last few games (setting) and a different artist than the last two questions, relaxing those rules as needed. */

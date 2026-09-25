@@ -79,12 +79,27 @@ const Player = {
     const hi = Math.max(0, dur - need - 1); return frac === -1 ? Math.min(8, hi) : frac * hi;
   },
   changed() { try { this.onChange?.(this.current, this.playing); } catch {} },
-  /* opts: {frac, start, len, need}. Resolves {ok, start} or {ok: false, superseded | blocked | unplayable} */
+  /* load a song ahead of time, so it starts at once (multiplayer waits for everyone's). preview: skip Spotify's player */
+  async preload(t, { preview = false } = {}) {
+    if (!preview && this.useSDK(t)) return true;
+    this.hardStop();
+    let url; try { url = await this.resolvePreview(t); } catch { return false; }
+    if (!url) return false;
+    const el = this.el;
+    if (el.src !== url) { el.preload = 'auto'; el.src = url; try { el.load(); } catch {} }
+    if (el.readyState >= 3) return true;
+    return new Promise(res => {
+      const done = v => { clearTimeout(tm); el.removeEventListener('canplay', ok); el.removeEventListener('error', bad); res(v); };
+      const ok = () => done(true), bad = () => done(false), tm = setTimeout(() => done(true), 5000);   // phones may not load until played
+      el.addEventListener('canplay', ok); el.addEventListener('error', bad);
+    });
+  },
+  /* opts: {frac, start, len, need, preview}. Resolves {ok, start} or {ok: false, superseded | blocked | unplayable} */
   async play(t, opts = {}) {
     this.hardStop();
     const my = ++this.token; this.current = t.id; this.playing = true; this.changed();
     const fail = r => { if (my === this.token) { this.playing = false; this.changed(); } return { ok: false, ...r, superseded: my !== this.token }; };
-    if (this.useSDK(t)) {
+    if (!opts.preview && this.useSDK(t)) {
       try {
         this.usingSDK = true;
         const dur = (t.dur || 180000) / 1000;
@@ -173,13 +188,13 @@ const Player = {
   },
   stop(fast = true) { if (fast) this.fadeOut(350); else this.hardStop(); },
   /* after an answer: keep the song going (resume if the clip ended), then fade per settings */
-  async afterAnswer(t, startSec) {
+  async afterAnswer(t, startSec, preview = false) {
     clearTimeout(this.stopTimer);
     if (S.afterAnswer === 'stop' || !t) return this.fadeOut(300);
     if (this.current === t.id) {
       if (!this.playing) { if (this.usingSDK) this.sdk?.resume().catch(() => {}); else this.el.play().catch(() => {}); this.playing = true; this.changed(); }
     } else {
-      await this.play(t, { start: startSec ?? undefined, frac: -1, len: 0, need: 20 });
+      await this.play(t, { start: startSec ?? undefined, frac: -1, len: 0, need: 20, preview });
     }
     if (S.afterAnswer === 'fade') this.fadeOut(1600, 2000);
   },

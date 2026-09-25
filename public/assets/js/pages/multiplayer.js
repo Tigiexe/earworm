@@ -51,7 +51,9 @@ function cleanTracks(list, owner) {
 const MP = {
   active: false, host: false, code: null, conns: new Set(), players: {}, libs: {}, myId: null,
   mode: 'classic', from: {}, shown: {}, state: 'idle', round: 0,
-  coop: false, coopRetry: false, team: null, teamScore: null,   // co-op: one shared answer and score for everyone total: 0, answers: {}, curQ: null, curLimit: 0, roundTimer: null, names: {}, lobby: null, myName: '', myHist: [],
+  coop: false, coopRetry: false, team: null, teamScore: null,   // co-op: one shared answer and score for everyone
+  exact: false,                                                 // song shares hit exactly instead of at random
+  ready: new Set(), started: false, readyTimer: null,           // each round starts only when everyone has the song loaded total: 0, answers: {}, curQ: null, curLimit: 0, roundTimer: null, names: {}, lobby: null, myName: '', myHist: [],
   open(joinCode) {
     UI.show('mp');
     const name = this.myName || Me?.display_name || store.get('mpName', '') || '';
@@ -75,7 +77,7 @@ const MP = {
   pub() {
     const shares = this.shares();
     return Object.values(this.players).map(p => ({ id: p.id, name: p.name, ci: p.ci, score: p.score, count: p.count, share: p.share, pct: shares[p.id] || 0, connected: p.connected,
-      answered: !!this.answers[p.id], streak: p.streak, correct: p.correct, from: this.from[p.name] || 0 }));
+      answered: !!this.answers[p.id], ready: this.ready.has(p.id), streak: p.streak, correct: p.correct, from: this.from[p.name] || 0 }));
   },
   /* each player's percentage of the songs, from the host's share sliders (players without songs, or who left, get 0) */
   shares() {
@@ -114,7 +116,7 @@ const MP = {
   guestLeft(id) {
     this.conns.delete(id);
     const p = this.players[id];
-    if (p) { p.connected = false; toast(p.name + ' left'); this.lobbyChanged(); if (this.state === 'question') this.checkAll(); }
+    if (p) { p.connected = false; toast(p.name + ' left'); this.lobbyChanged(); if (this.state === 'question') { if (this.started) this.checkAll(); else this.checkReady(); } }
   },
   hostRecv(id, d) {
     if (!d || typeof d !== 'object' || !this.conns.has(id)) return;
@@ -131,13 +133,19 @@ const MP = {
       this.players[id] = old ? { ...old, id, name, count: tracks.length, connected: true }
         : { id, key, name, ci: this.nextColor(), score: 0, streak: 0, correct: 0, share: 50, count: tracks.length, connected: true };
       this.libs[id] = tracks;
+      this.players[id].sdk = d.sdk === true;   // can this player hear full songs through Spotify?
       this.send(id, { t: 'welcome', id });
       toast(name + (old ? ' is back' : ' joined'));
       if (this.state !== 'lobby') {
         this.send(id, { t: 'start', names: this.names, total: this.total, info: this.info, coop: this.coop, coopRetry: this.coopRetry, teamScore: this.teamScore });
-        if (this.state === 'question' && this.curQ) this.send(id, { t: 'q', round: this.round, total: this.total, q: this.curQ, limit: this.curLimit });
+        if (this.state === 'question' && this.curQ) {
+          this.send(id, { t: 'q', round: this.round, total: this.total, q: this.curQ, limit: this.curLimit });
+          if (this.started) this.send(id, { t: 'go', round: this.round, pause: 0 });
+        }
       }
       this.lobbyChanged();
+    } else if (d.t === 'ready') {
+      if (d.round === this.round && d.qid === this.curQ?.id) this.onReady(id, d.sdk === true);
     } else if (d.t === 'answer') {
       if (d.round === this.round && d.qid === this.curQ?.id && d.res && typeof d.res === 'object') this.receive(id, d.res);
     }
@@ -180,7 +188,8 @@ const MP = {
           ${withSongs.length ? `<div class="mix-box"><h3>Whose songs get played</h3>
             <div class="mix-bar">${withSongs.map(p => `<i data-id="${esc(p.id)}" style="--pc:${playerColor(p.name)};width:${p.pct}%" title="${esc(p.name)} ${p.pct}%"></i>`).join('')}</div>
             <div class="mix-legend">${withSongs.map(p => `<span><i style="background:${playerColor(p.name)}"></i>${esc(p.name)} <b class="num" data-pct="${esc(p.id)}">${p.pct}%</b></span>`).join('')}</div>
-            ${isHost && withSongs.length > 1 ? `<div class="row" style="margin-top:8px"><button class="btn sm ghost" data-act="mpShareEven">Same for everyone</button><button class="btn sm ghost" data-act="mpShareSize">By number of songs</button></div>
+            ${isHost && withSongs.length > 1 ? `<label class="chk"><input type="checkbox" data-act="mpExact" ${this.exact ? 'checked' : ''}> Exact split — e.g. 50/50 means every other song, not a coin flip each time</label>
+              <div class="row" style="margin-top:8px"><button class="btn sm ghost" data-act="mpShareEven">Same for everyone</button><button class="btn sm ghost" data-act="mpShareSize">By number of songs</button></div>
               <p class="mute" style="margin:6px 0 0"><small>Drag someone’s slider to 0 to leave their songs out.</small></p>` : ''}</div>` : ''}
           ${isHost ? `<p class="mute" style="margin-top:12px">${fmtN(mixCount)} songs in the mix before filters.</p><div class="row"><button class="btn primary big" data-act="mpStart">Start game</button><button class="btn ghost" data-act="mpLeave">Close game</button></div>` : `<div class="row" style="margin-top:12px"><button class="btn ghost" data-act="mpLeave">Leave</button></div>`}
         </div>
@@ -201,7 +210,7 @@ const MP = {
     if (pool.length < 4) return toast('Fewer than 4 songs in the mix after filters.');
     // each player's songs come up according to their share; only songs everyone can hear are used (most guests get 30-second previews)
     const weights = {}; for (const p of Object.values(this.players)) if (p.connected && p.share > 0) weights[p.name] = p.share;
-    const types = Engine.setup(pool, { groupBy: t => t.owners || [], weights, needPreview: true });
+    const types = Engine.setup(pool, { groupBy: t => t.owners || [], weights, exact: this.exact, needPreview: true });
     if (!types.length) return toast('None of the selected question types work with these songs.');
     if (Engine.skipped.length) toast('Skipped ' + Engine.skipped.map(k => TYPES[k].name).join(', ') + ' — not enough song data.');
     for (const p of Object.values(this.players)) { p.score = 0; p.streak = 0; p.correct = 0; }
@@ -229,17 +238,45 @@ const MP = {
     if (!this.active || !this.host) return;
     if (!q) { toast('Ran out of playable songs.'); return this.hostEnd(); }
     if (!reroll) this.round++;
-    this.answers = {}; this.curQ = q; this.state = 'question';
+    this.answers = {}; this.curQ = q; this.state = 'question'; this.started = false; this.ready = new Set();
+    // everyone hears the same thing: full songs only when every player has Spotify Premium working, otherwise the 30 s preview
+    q.previewOnly = !Object.values(this.players).filter(p => p.connected).every(p => p.id === 'host' ? Player.mode() === 'sdk' : p.sdk);
     const limit = this.curLimit = limitFor(q, true);
     this.broadcast({ t: 'q', round: this.round, total: this.total, q, limit });
-    this.roundTimer = setTimeout(() => this.hostReveal(), (limit + 4) * 1000);
     this.renderBoard(this.pub());
-    this.playLocal(q, limit, this.round);
+    clearTimeout(this.readyTimer); this.readyTimer = setTimeout(() => this.go(), 8000);   // nobody waits more than 8 s for a slow player
+    this.prep(q, this.round);
   },
-  async playLocal(q, limit, round) {
+  /* load the song, then tell the host this player is ready */
+  async prep(q, round) {
+    this.hud(round); Reveal.clear();
+    $('#qArea').innerHTML = '<div class="loading">Loading the song for everyone…</div>';
+    if (q.audio && q.track) await Player.preload(q.track, { preview: !!q.previewOnly }).catch(() => false);
+    if (round !== this.round || q !== this.curQ || this.started) return;
+    if (this.host) this.onReady('host', Player.mode() === 'sdk');
+    else this.up({ t: 'ready', round, qid: q.id, sdk: Player.mode() === 'sdk' });
+  },
+  onReady(pid, sdk) {
+    if (this.state !== 'question' || this.started || !this.players[pid]) return;
+    this.ready.add(pid); this.players[pid].sdk = sdk;
+    const pub = this.pub(); this.broadcast({ t: 'answered', players: pub }); this.renderBoard(pub);
+    this.checkReady();
+  },
+  checkReady() { const need = Object.values(this.players).filter(p => p.connected); if (need.every(p => this.ready.has(p.id))) this.go(); },
+  /* start the round for everyone at the same moment, with the host's break length */
+  go() {
+    if (this.state !== 'question' || this.started) return;
+    this.started = true; clearTimeout(this.readyTimer);
+    const pause = S.readyPause;
+    this.broadcast({ t: 'go', round: this.round, pause });
+    clearTimeout(this.roundTimer); this.roundTimer = setTimeout(() => this.hostReveal(), (this.curLimit + pause + 4) * 1000);
+    this.renderBoard(this.pub());
+    this.playLocal(this.curQ, this.curLimit, this.round, pause);
+  },
+  async playLocal(q, limit, round, pause = S.readyPause) {
     this.hud(round);
     Reveal.clear();
-    const res = await QUI.run(q, { limit, names: this.names, roundLabel: round, pause: S.readyPause, reroll: this.host && (this.rerolls || 0) < 3, onShown: this.host ? x => Engine.shown(x) : null });
+    const res = await QUI.run(q, { limit, names: this.names, roundLabel: round, pause, reroll: this.host && (this.rerolls || 0) < 3, onShown: this.host ? x => Engine.shown(x) : null });
     if (!this.active || round !== this.round || q !== this.curQ) return;
     if (res.unplayable && this.host) { this.rerolls = (this.rerolls || 0) + 1; Engine.markBad(q.track); toast('That song wouldn’t play — picking another.', 2500); return this.hostNext(true); }
     this.rerolls = 0;
@@ -271,7 +308,7 @@ const MP = {
   /* co-op: a teammate's wrong guess, shown to everyone; with multiple choice that option is ruled out */
   onTried(d) {
     const q = this.curQ; if (!q || !d || typeof d.given !== 'string') return;
-    if (q.format === 'choice') { const b = $(`#qArea [data-i="${q.choices.indexOf(d.given)}"]`); if (b) { b.classList.add('wrong'); b.disabled = true; } }
+    if (q.format === 'choice') { const b = $(`#qArea [data-i="${q.choices.indexOf(d.given)}"]`); if (b) { b.classList.add('wrong'); b.disabled = true; choiceMark(b, false); } }
     let log = $('#teamTries');
     if (!log) { $('#qArea')?.insertAdjacentHTML('beforeend', '<div class="team-tries" id="teamTries"></div>'); log = $('#teamTries'); }
     log?.insertAdjacentHTML('beforeend', `<div>${avatar(d.name)}<span><b>${esc(d.name)}</b> tried “${esc(d.given)}”</span><span class="x-mark">✗</span></div>`);
@@ -313,7 +350,7 @@ const MP = {
     this.broadcast(msg); this.onReveal(msg);
   },
   hostEnd() {
-    clearTimeout(this.roundTimer);
+    clearTimeout(this.roundTimer); clearTimeout(this.readyTimer);
     this.state = 'ended'; const players = this.pub();
     const msg = { t: 'end', players, coop: this.coop, teamScore: this.teamScore, total: this.total };
     this.broadcast(msg); this.showPodium(players, msg);
@@ -344,7 +381,7 @@ const MP = {
     if (m.t === 'joined') {
       this.myId = m.id; this.state = 'lobby';
       const tracks = share ? shuffle(Lib.all()).slice(0, 1500).map(slimTrack) : [];
-      this.up({ t: 'hello', name, key: mpKey(), tracks });
+      this.up({ t: 'hello', name, key: mpKey(), tracks, sdk: Player.mode() === 'sdk' });
     } else if (m.t === 'error') { toast(m.msg || 'Couldn’t join.'); this.leave(true); }
     else if (m.t === 'closed') {
       if (this.state === 'ended') { this.active = false; Net.close(); return; }
@@ -369,8 +406,11 @@ const MP = {
       case 'q':
         if (!d.q || typeof d.q !== 'object') return;
         if (!$('#scr-game').classList.contains('active')) this.enterGame();
-        Player.fadeOut(200); this.round = d.round; this.total = d.total; this.curQ = d.q; this.state = 'question';
-        this.playLocal(d.q, d.limit, d.round); break;
+        Player.fadeOut(200); this.round = d.round; this.total = d.total; this.curQ = d.q; this.curLimit = d.limit; this.state = 'question'; this.started = false;
+        this.prep(d.q, d.round); break;
+      case 'go':
+        if (d.round !== this.round || this.started || !this.curQ) return;
+        this.started = true; this.playLocal(this.curQ, this.curLimit, this.round, clamp(+d.pause || 0, 0, 3)); break;
       case 'answered': this.renderBoard(d.players); break;
       case 'reveal': if (d.round === this.round) { this.state = 'reveal'; this.onReveal(d); } break;
       case 'end': this.state = 'ended'; QUI.abort(); Player.fadeOut(300); this.showPodium(d.players || [], d); break;
@@ -387,7 +427,7 @@ const MP = {
     QUI.markReveal(mine);
     if (mine?.correct) SFX.ok(); else if (mine?.factor > 0) SFX.part(); else SFX.bad();
     if (mine?.pts) floatPts(mine.pts);
-    if (q.track && (q.audio || q.type === 'cover')) Player.afterAnswer(q.track, QUI.ctx?.startSec); else Player.fadeOut(300);
+    if (q.track && (q.audio || q.type === 'cover')) Player.afterAnswer(q.track, QUI.ctx?.startSec, !!q.previewOnly); else Player.fadeOut(300);
     this.learnColors(msg.players);
     const me = msg.players.find(p => p.id === this.myId);
     if (me) $('#hudStreak').textContent = streakTxt(me.streak);
@@ -415,7 +455,7 @@ const MP = {
     QUI.markReveal(res);
     if (res.correct) SFX.ok(); else if (res.factor > 0) SFX.part(); else SFX.bad();
     if (res.pts) floatPts(res.pts);
-    if (q.track && (q.audio || q.type === 'cover')) Player.afterAnswer(q.track, QUI.ctx?.startSec); else Player.fadeOut(300);
+    if (q.track && (q.audio || q.type === 'cover')) Player.afterAnswer(q.track, QUI.ctx?.startSec, !!q.previewOnly); else Player.fadeOut(300);
     this.learnColors(msg.players);
     $('#hudStreak').textContent = streakTxt(this.teamScore?.streak || 0);
     const cls = res.correct ? 'ok' : res.factor > 0 ? 'part' : 'no';
@@ -439,7 +479,7 @@ const MP = {
       b.innerHTML = `<h3>Scores <small class="mute">${this.round ? `song ${esc(this.round)} of ${esc(this.total)}` : ''}</small></h3>${sorted.map((p, i) => `<div class="board-row ${p.id === this.myId ? 'me' : ''}" data-key="${esc(p.id)}">
         <span class="pos">${i + 1}</span>${avatar(p.name)}
         <span class="n">${esc(p.name)}${p.connected ? '' : ' <small class="mute">(left)</small>'}${p.streak >= 3 ? ` <small class="streak">🔥${p.streak}</small>` : ''}</span>
-        ${asking && p.connected ? `<span class="st ${p.answered ? 'done' : ''}" title="${p.answered ? 'Locked in' : 'Thinking'}">${p.answered ? '✓' : '…'}</span>` : ''}
+        ${asking && p.connected ? this.statusIcon(p) : ''}
         <b class="num sc" data-v="${this.shown[p.id] ?? p.score}">${fmtN(this.shown[p.id] ?? p.score)}</b></div>`).join('')}
         ${this.info ? `<details class="gi-more"><summary>About this game</summary>${infoHTML(this.info)}</details>` : ''}`;
       const more = $('.gi-more', b); if (more && this.infoOpen) more.open = true;
@@ -447,6 +487,12 @@ const MP = {
     });
     for (const p of sorted) { countUp($(`.board-row[data-key="${CSS.escape(p.id)}"] .sc`, b), p.score); this.shown[p.id] = p.score; }
     const me = players.find(p => p.id === this.myId); if (me) countUp($('#hudScore'), me.score);
+  },
+  /* ⏳ still loading the song · … thinking · ✓ answered */
+  statusIcon(p) {
+    if (p.answered) return '<span class="st done" title="Answered">✓</span>';
+    if (!this.started && !p.ready) return '<span class="st load" title="Loading the song">⏳</span>';
+    return '<span class="st" title="Thinking">…</span>';
   },
   /* co-op scoreboard: the team's score, and who has answered what */
   renderTeamBoard(b, players) {
@@ -458,7 +504,7 @@ const MP = {
         <div class="team-score"><b class="num sc" data-v="${shownScore}">${fmtN(shownScore)}</b><span class="mute">${fmtN(ts.correct)} right${ts.streak >= 3 ? ` · <span class="streak">🔥${ts.streak}</span>` : ''}</span></div>
         ${list.map(p => `<div class="board-row ${p.id === this.myId ? 'me' : ''}" data-key="${esc(p.id)}">${avatar(p.name)}
           <span class="n">${esc(p.name)}${p.connected ? '' : ' <small class="mute">(left)</small>'}</span>
-          ${asking && p.connected ? `<span class="st ${p.answered ? 'done' : ''}" title="${p.answered ? 'Answered' : 'Thinking'}">${p.answered ? '✓' : '…'}</span>` : ''}
+          ${asking && p.connected ? this.statusIcon(p) : ''}
           <small class="mute num" title="Right answers for the team">${fmtN(p.correct)} ✓</small></div>`).join('')}
         ${this.info ? `<details class="gi-more"><summary>About this game</summary>${infoHTML(this.info)}</details>` : ''}`;
       const more = $('.gi-more', b); if (more && this.infoOpen) more.open = true;
@@ -469,32 +515,35 @@ const MP = {
   showPodium(players, end = {}) {
     Reveal.clear(); Player.fadeOut(300);
     if (end.coop) return this.showTeamResult(players, end);
-    const sorted = [...players].sort((a, b) => b.score - a.score);
-    if (this.myHist?.length) { const me = sorted.find(p => p.id === this.myId); let best = 0, run = 0; for (const h of this.myHist) { run = h.res.correct ? run + 1 : 0; best = Math.max(best, run); } Stats.record({ key: 'multiplayer', name: 'Multiplayer', score: me?.score || 0, bestStreak: best, mp: true, place: sorted.indexOf(me) + 1, players: sorted.length }, this.myHist); this.myHist = []; }
+    const sorted = [...players].sort((a, b) => b.score - a.score), hist = this.myHist || [];
+    if (hist.length) { const me = sorted.find(p => p.id === this.myId); let best = 0, run = 0; for (const h of hist) { run = h.res.correct ? run + 1 : 0; best = Math.max(best, run); } Stats.record({ key: 'multiplayer', name: 'Multiplayer', score: me?.score || 0, bestStreak: best, mp: true, place: sorted.indexOf(me) + 1, players: sorted.length }, hist); this.myHist = []; }
     this.learnColors(sorted);
     const medal = ['🥇', '🥈', '🥉'], top = [sorted[1], sorted[0], sorted[2]], place = [2, 1, 3];
     $('#scr-results').innerHTML = `<div class="res-head"><p class="mute">Final scores</p><div class="res-score" style="font-size:clamp(40px,8vw,80px)">${esc(sorted[0]?.name || '')} wins</div></div>
       <div class="podium-stage">${top.map((p, i) => p ? `<div class="pod p${place[i]}" style="--pc:${playerColor(p.name)}">${avatar(p.name, 'big')}<b>${esc(p.name)}</b><span class="num">${fmtN(p.score)}</span><div class="block"><span>${medal[place[i] - 1]}</span></div></div>` : '<div class="pod empty"></div>').join('')}</div>
       <div class="podium panel">${sorted.map((p, i) => `<div class="board-row" style="font-size:17px;animation-delay:${300 + i * 80}ms"><span class="pos">${medal[i] || i + 1}</span>${avatar(p.name)}<span class="n"><b>${esc(p.name)}</b>${p.id === this.myId ? ' <small class="mute">(you)</small>' : ''}
         <br><small class="mute">${fmtN(p.correct)} right${p.from ? ` · ${fmtN(p.from)} of the songs were theirs` : ''}</small></span><b class="num">${fmtN(p.score)}</b></div>`).join('')}
-      <div class="row" style="margin-top:16px">${this.host ? '<button class="btn primary" data-act="mpLobby">Back to lobby</button><button class="btn ghost" data-act="mpLeave">Close game</button>' : '<span class="mute">Waiting for the host…</span><button class="btn ghost" data-act="mpLeave">Leave</button>'}</div></div>`;
+      <div class="row" style="margin-top:16px">${this.host ? '<button class="btn primary" data-act="mpLobby">Back to lobby</button><button class="btn ghost" data-act="mpLeave">Close game</button>' : '<span class="mute">Waiting for the host…</span><button class="btn ghost" data-act="mpLeave">Leave</button>'}</div></div>
+      ${hist.length ? `<h2 class="res-songs-h">All the songs <small class="mute">your answers</small></h2>${songListHTML(hist)}` : ''}`;
     UI.show('results');
   },
   showTeamResult(players, end) {
     const ts = end.teamScore && typeof end.teamScore === 'object' ? end.teamScore : this.teamScore || { score: 0, correct: 0, best: 0 };
     const sorted = [...players].filter(p => p.connected || p.correct || p.from).sort((a, b) => b.correct - a.correct || b.from - a.from);
     const n = this.myHist?.length || end.total || 0;
-    if (this.myHist?.length) { Stats.record({ key: 'coop', name: 'Co-op', score: ts.score, bestStreak: ts.best || 0, mp: true, players: sorted.length }, this.myHist); this.myHist = []; }
+    const hist = this.myHist || [];
+    if (hist.length) { Stats.record({ key: 'coop', name: 'Co-op', score: ts.score, bestStreak: ts.best || 0, mp: true, players: sorted.length }, hist); this.myHist = []; }
     this.learnColors(sorted);
     $('#scr-results').innerHTML = `<div class="res-head"><p class="mute">🤝 Team score</p><div class="res-score num">${fmtN(ts.score)}</div>
         <div class="res-stats"><div class="stat"><b class="num">${fmtN(ts.correct)}/${fmtN(n)}</b><span>right</span></div><div class="stat"><b class="num">${fmtN(ts.best || 0)}</b><span>best streak</span></div><div class="stat"><b class="num">${fmtN(sorted.length)}</b><span>players</span></div></div></div>
       <div class="podium panel"><h3>Who helped</h3>${sorted.map((p, i) => `<div class="board-row" style="font-size:17px;animation-delay:${200 + i * 80}ms">${avatar(p.name)}<span class="n"><b>${esc(p.name)}</b>${p.id === this.myId ? ' <small class="mute">(you)</small>' : ''}
         <br><small class="mute">${p.from ? `${fmtN(p.from)} of the songs were theirs` : 'no songs of theirs came up'}</small></span><b class="num">${fmtN(p.correct)} ✓</b></div>`).join('')}
-      <div class="row" style="margin-top:16px">${this.host ? '<button class="btn primary" data-act="mpLobby">Back to lobby</button><button class="btn ghost" data-act="mpLeave">Close game</button>' : '<span class="mute">Waiting for the host…</span><button class="btn ghost" data-act="mpLeave">Leave</button>'}</div></div>`;
+      <div class="row" style="margin-top:16px">${this.host ? '<button class="btn primary" data-act="mpLobby">Back to lobby</button><button class="btn ghost" data-act="mpLeave">Close game</button>' : '<span class="mute">Waiting for the host…</span><button class="btn ghost" data-act="mpLeave">Leave</button>'}</div></div>
+      ${hist.length ? `<h2 class="res-songs-h">All the songs</h2>${songListHTML(hist)}` : ''}`;
     UI.show('results');
   },
   reset() {
-    clearTimeout(this.roundTimer);
+    clearTimeout(this.roundTimer); clearTimeout(this.readyTimer);
     Net.on = null; Net.onClose = null; Net.close();
     Object.assign(this, { conns: new Set(), players: {}, libs: {}, answers: {}, curQ: null, round: 0, total: 0, state: 'idle', lobby: null, code: null, myId: null, from: {}, shown: {} });
     PlayerColors.clear();
@@ -519,6 +568,7 @@ Object.assign(Act, {
   mpPreset(el) { if (!PRESETS[el.dataset.k]) return; MP.mode = el.dataset.k; MP.lobbyChanged(); },
   mpStyle(el) { MP.coop = el.dataset.v === 'coop'; MP.lobbyChanged(); },
   mpRetry(el) { MP.coopRetry = el.checked; MP.lobbyChanged(); },
+  mpExact(el) { MP.exact = el.checked; MP.lobbyChanged(); },
   mpSettings() { SettingsUI.open('modal', MP.mode, { mp: true, onClose: () => { if (MP.host && MP.state === 'lobby') MP.lobbyChanged(); } }); },
   quit() { Act.mpLeave(); }
 });

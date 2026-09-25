@@ -528,3 +528,13 @@ a.mode.feature{display:flex}
 .team-tries span:nth-child(2){flex:1;min-width:0}
 .team-tries .x-mark{color:var(--hot);font-weight:800}
 .gi-coop{margin:10px 0 0!important;padding:8px 10px;border-radius:10px;background:color-mix(in srgb,var(--ok) 12%,var(--card))}
+
+/* ---------- ✓ / ✗ on answer options, loading status, song list ---------- */
+.choice .cmark{flex:none;margin-left:auto;width:24px;height:24px;border-radius:50%;display:grid;place-items:center;font-weight:800;font-size:14px;animation:pop .3s ease-out}
+.choice .cmark.ok{background:var(--ok);color:#10301f}
+.choice .cmark.no{background:var(--hot);color:#3a0d1c}
+.cards .choice .cmark{position:absolute;top:8px;left:8px;margin:0}
+.cards .choice{position:relative}
+.board-row .st.load{background:transparent;animation:think 1s ease-in-out infinite}
+.res-songs-h{max-width:720px;margin:34px auto 6px;font-size:22px}
+.res-songs-h small{font-size:14px;font-weight:600}

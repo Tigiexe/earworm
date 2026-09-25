@@ -29,6 +29,22 @@ function trackCard(t, opts = {}) {
     <div class="rv-btns">${playBtn(t)}${opts.noLike ? '' : likeBtn(t)}${openLink(t)}</div></div>`;
 }
 
+/* a ✓ or ✗ next to an answer option once it's been guessed / revealed */
+function choiceMark(b, ok) {
+  if (!b || b.querySelector('.cmark')) return;
+  b.insertAdjacentHTML('beforeend', `<span class="cmark ${ok ? 'ok' : 'no'}" aria-label="${ok ? 'right' : 'wrong'}">${ok ? '✓' : '✗'}</span>`);
+}
+/* every song of a finished game, with play and like buttons (solo results page and multiplayer end screen) */
+function songListHTML(hist) {
+  return `<div class="res-list">${hist.filter(h => h.q?.track).map(h => {
+    const t = h.q.track, r = h.res || {}, cls = r.correct ? 'ok' : r.factor > 0 ? 'part' : 'no', T = TYPES[h.q.type] || { icon: '', name: '' };
+    const said = r.given && r.given !== '—' && r.given !== h.q.answer ? ` · “${esc(r.given)}”${r.byName ? ` by ${esc(r.byName)}` : ''}` : r.byName ? ` · ${esc(r.byName)}` : '';
+    const whose = t.owners?.length ? ` · ${esc(t.owners.join(' & '))}’s songs` : t.similar ? ' · ✨ similar song' : '';
+    return `<div class="res-item">${t.album?.thumb ? `<img src="${esc(t.album.thumb)}" alt="">` : ''}<div class="m"><div><b>${esc(t.name || '')}</b> — ${esc(t.artists?.[0]?.name || '')}</div><div class="mute"><small>${T.icon} ${esc(T.name)}${said}${whose}</small></div></div>
+      <div class="rv-btns">${playBtn(t)}${likeBtn(t)}</div><div class="p num ${cls}">${h.pts > 0 ? '+' : ''}${esc(h.pts ?? 0)}</div></div>`;
+  }).join('')}</div>`;
+}
+
 /* ---------------- question UI ---------------- */
 const COVER_STEPS = 8;
 const PIXEL_BLOCKS = [5, 8, 12, 18, 26, 38, 60, 110, 0];
@@ -183,7 +199,7 @@ const QUI = {
     let r = null;
     if (q.type === 'heardle') r = await this.playStage(ctx, true);
     else if (q.audio) {
-      r = await Player.play(q.track, { frac: q.startFrac, len: q.clipLength || 0, need: Math.max(ctx.opt.limit || 15, q.clipLength || 0) });
+      r = await Player.play(q.track, { frac: q.startFrac, len: q.clipLength || 0, need: Math.max(ctx.opt.limit || 15, q.clipLength || 0), preview: !!q.previewOnly });
       if (ctx.done) return;
       ctx.startSec = r.start;
       if (r.ok) $('#vinyl')?.classList.add('spin');
@@ -250,7 +266,7 @@ const QUI = {
   },
   async replay(ctx) {
     const q = ctx.q; if (!q.audio || ctx.waiting) return;
-    const r = await Player.play(q.track, { start: ctx.startSec, frac: q.startFrac, len: q.clipLength || 0, need: ctx.opt.limit || 15 });
+    const r = await Player.play(q.track, { start: ctx.startSec, frac: q.startFrac, len: q.clipLength || 0, need: ctx.opt.limit || 15, preview: !!q.previewOnly });
     if (r.ok) { ctx.startSec = r.start; $('#vinyl')?.classList.add('spin'); }
   },
   submitText(ctx) {
@@ -301,8 +317,8 @@ const QUI = {
   markReveal(res) {
     const ctx = this.ctx; if (!ctx) return; const q = ctx.q;
     if (q.format === 'choice') {
-      $(`#qArea [data-i="${q.answerIndex}"]`)?.classList.add('right');
-      $$('#qArea .choice.picked').forEach(b => { if (+b.dataset.i !== q.answerIndex) b.classList.add('wrong'); });
+      const right = $(`#qArea [data-i="${q.answerIndex}"]`); right?.classList.add('right'); choiceMark(right, true);
+      $$('#qArea .choice.picked').forEach(b => { if (+b.dataset.i !== q.answerIndex) { b.classList.add('wrong'); choiceMark(b, false); } });
     } else if (q.format === 'text') $('#textAns')?.classList.add(res?.correct ? 'right' : 'wrong');
     else if (q.format === 'slider') { const out = $('#yrOut'); if (out) out.innerHTML = `<span class="yr-true">${q.year}</span>`; }
     $$('#qArea .card-p').forEach(b => b.classList.remove('hidden'));
@@ -356,7 +372,7 @@ const QUI = {
   },
   async playStage(ctx, first = false) {
     const q = ctx.q;
-    const r = await Player.play(q.track, { start: ctx.startSec, frac: q.startFrac, len: q.stages[ctx.stage], need: 17 });
+    const r = await Player.play(q.track, { start: ctx.startSec, frac: q.startFrac, len: q.stages[ctx.stage], need: 17, preview: !!q.previewOnly });
     if (r.ok) { ctx.startSec = r.start; const v = $('#vinyl'); v?.classList.add('spin'); ctx.timers.push(setTimeout(() => v?.classList.remove('spin'), q.stages[ctx.stage] * 1000)); }
     else if (!first && !r.superseded && !ctx.done) toast(r.blocked ? 'Tap Play to start the audio.' : 'Couldn’t play this clip.');
     return r;
@@ -371,7 +387,7 @@ const QUI = {
       this.heardleMark(ctx.stage, 'hit', '✓ ' + (q.format === 'choice' ? q.choices[given] : given));
       res.extra.stage = ctx.stage; res.extra.secs = q.stages[ctx.stage]; ctx.finish(res); return;
     }
-    if (q.format === 'choice') { const b = $(`#qArea [data-i="${given}"]`); if (b) { b.classList.add('wrong'); b.disabled = true; } }
+    if (q.format === 'choice') { const b = $(`#qArea [data-i="${given}"]`); if (b) { b.classList.add('wrong'); b.disabled = true; choiceMark(b, false); } }
     this.heardleNext(ctx, q.format === 'choice' ? q.choices[given] : given);
   },
   heardleNext(ctx, wrongGuess) {

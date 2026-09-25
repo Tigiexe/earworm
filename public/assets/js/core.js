@@ -123,7 +123,7 @@ const DEFAULTS = {
   yearFormat: 'slider', yearShowInfo: true,
   similar: 0, similarMix: { album: 40, artist: 40, related: 20 },   // per mode: share of questions that use a relative of the picked song
   heardleStages: [0.1, 1, 2, 4, 7, 11, 16],                         // per mode: seconds of the song you get at each Heardle step
-  mixMode: 'even',                  // 'even': every song source gets the same share of questions; 'size': bigger sources come up more
+  mixMode: 'even', exactSplit: false,   // exactSplit: hit the shares exactly instead of picking at random with those odds                  // 'even': every song source gets the same share of questions; 'size': bigger sources come up more
   avoidRecent: true, recentGames: 3, // keep songs from your last N games out until nothing else is left
   filters: { yearMin: null, yearMax: null, genres: [], artist: '', noExplicit: false },
   accent: '#ffb547', maxLiked: 1000, topRange: 'medium_term'
