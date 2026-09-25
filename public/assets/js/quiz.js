@@ -477,6 +477,7 @@ function infoHTML(info, live = null) {
   const pct = n => `${Math.round(+n || 0)}%`;
   return `<div class="gi">
     <div class="gi-mode"><span class="gi-ic">${esc(info.icon)}</span><div><b>${esc(info.name)}</b><small class="mute">${esc(info.summary)}</small></div></div>
+    ${info.coop ? `<p class="gi-coop">🤝 Co-op — the first answer counts for the whole team${info.coopRetry ? '; a wrong one only rules itself out' : ''}.</p>` : ''}
     ${live ? `<div class="gi-live"><div><b class="num">${fmtN(live.correct)}/${fmtN(live.answered)}</b><span>right</span></div><div><b class="num">${fmtN(live.best)}</b><span>best streak</span></div></div>` : ''}
     ${live?.last ? `<div class="gi-last"><small class="mute">Last song came from</small><br>${esc(live.last)}</div>` : ''}
     <h4>In the mix <small class="mute">${fmtN(info.songs)} songs</small></h4>

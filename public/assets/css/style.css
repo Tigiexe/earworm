@@ -519,3 +519,12 @@ a.mode.feature{display:flex}
 .hd-tries li.miss{border-left:3px solid var(--hot);color:var(--ink)}
 .hd-tries li.skip{border-left:3px solid var(--line)}
 .hd-tries li.hit{border-left:3px solid var(--ok);color:var(--ok);font-weight:700}
+
+/* ---------- co-op ---------- */
+.team-score{display:flex;align-items:baseline;gap:12px;margin:0 0 10px;padding:10px 12px;border-radius:12px;background:color-mix(in srgb,var(--ok) 10%,var(--card))}
+.team-score b{font-size:34px;font-weight:800;line-height:1}
+.team-tries{display:flex;flex-direction:column;gap:6px;margin-top:12px}
+.team-tries>div{display:flex;align-items:center;gap:10px;padding:6px 10px;border-radius:10px;background:var(--card);border-left:3px solid var(--hot);animation:slideIn .3s ease-out}
+.team-tries span:nth-child(2){flex:1;min-width:0}
+.team-tries .x-mark{color:var(--hot);font-weight:800}
+.gi-coop{margin:10px 0 0!important;padding:8px 10px;border-radius:10px;background:color-mix(in srgb,var(--ok) 12%,var(--card))}
