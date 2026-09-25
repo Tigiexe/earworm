@@ -15,7 +15,7 @@ const Net = {
       ws.onopen = () => { opened = true; clearTimeout(tm); res(); };
       ws.onerror = fail;
       ws.onmessage = e => { let m; try { m = JSON.parse(e.data); } catch { return; } if (m && typeof m === 'object') this.on?.(m); };
-      ws.onclose = () => { if (this.ws !== ws) return; this.ws = null; if (opened) this.onClose?.(); else fail(); };
+      ws.onclose = e => { if (this.ws !== ws) return; this.ws = null; if (opened) this.onClose?.(e.code); else fail(); };
       this.ws = ws;
     });
   },
@@ -53,6 +53,7 @@ const MP = {
   mode: 'classic', from: {}, shown: {}, state: 'idle', round: 0,
   coop: false, coopRetry: false, team: null, teamScore: null,   // co-op: one shared answer and score for everyone
   exact: false,                                                 // song shares hit exactly instead of at random
+  banned: new Set(),                                            // browser tabs the host removed from this game
   ready: new Set(), started: false, readyTimer: null,           // each round starts only when everyone has the song loaded total: 0, answers: {}, curQ: null, curLimit: 0, roundTimer: null, names: {}, lobby: null, myName: '', myHist: [],
   open(joinCode) {
     UI.show('mp');
@@ -113,6 +114,14 @@ const MP = {
     else if (m.t === 'peer' && m.ev === 'close') this.guestLeft(m.id);
     else if (m.t === 'msg') this.hostRecv(m.from, m.d);
   },
+  /* host: remove a player from the lobby; the same browser tab can't come back into this game */
+  kick(id) {
+    const p = this.players[id]; if (!p || id === 'host') return;
+    if (p.key) this.banned.add(p.key);
+    Net.send({ t: 'kick', id });
+    this.conns.delete(id); delete this.players[id]; delete this.libs[id];
+    toast(`${p.name} was removed.`); this.lobbyChanged();
+  },
   guestLeft(id) {
     this.conns.delete(id);
     const p = this.players[id];
@@ -123,6 +132,7 @@ const MP = {
     if (d.t === 'hello') {
       if (this.players[id]) return;
       const key = typeof d.key === 'string' ? d.key.slice(0, 40) : '';
+      if (key && this.banned.has(key)) { Net.send({ t: 'kick', id }); this.conns.delete(id); return; }   // removed earlier
       const old = key ? Object.values(this.players).find(p => p.key === key && !p.connected) : null;   // same browser tab coming back
       if (old) { delete this.players[old.id]; delete this.libs[old.id]; }
       // songs are credited by name, so names must be unique
@@ -184,6 +194,7 @@ const MP = {
           <div class="plist">${players.map(p => `<div class="player ${p.connected ? '' : 'gone'}" data-key="${esc(p.id)}">${avatar(p.name)}
             <span class="n"><b>${esc(p.name)}</b>${p.id === 'host' ? ' <span class="tag">host</span>' : ''}${p.id === this.myId ? ' <span class="mute">(you)</span>' : ''}${p.connected ? '' : ' <span class="mute">(left)</span>'}
               <br><small class="mute">${p.count ? fmtN(p.count) + ' songs' : 'no songs shared'}</small></span>
+            ${isHost && p.id !== 'host' ? `<button type="button" class="btn sm ghost kick" data-act="mpKick" data-id="${esc(p.id)}" title="Remove ${esc(p.name)} from the game" aria-label="Remove ${esc(p.name)}">✕</button>` : ''}
             ${p.count && p.connected ? `<span class="share">${isHost ? `<input type="range" class="share-in" min="0" max="100" step="1" value="${p.share}" data-id="${esc(p.id)}" aria-label="Share of songs from ${esc(p.name)}">` : ''}<b class="pct num" data-id="${esc(p.id)}">${p.pct}%</b></span>` : ''}</div>`).join('')}</div>
           ${withSongs.length ? `<div class="mix-box"><h3>Whose songs get played</h3>
             <div class="mix-bar">${withSongs.map(p => `<i data-id="${esc(p.id)}" style="--pc:${playerColor(p.name)};width:${p.pct}%" title="${esc(p.name)} ${p.pct}%"></i>`).join('')}</div>
@@ -386,7 +397,12 @@ const MP = {
     try { await Net.open(); } catch (e) { toast(e.message); return this.open(code); }
     this.active = true; this.host = false; this.state = 'joining';
     Net.on = m => this.guestNet(m, name, share);
-    Net.onClose = () => { if (!this.active) return; if (this.state === 'ended') { this.active = false; return; } toast('Lost the connection to the game.'); this.leave(true); };
+    Net.onClose = code => {
+      if (!this.active) return;
+      if (code === 4000) { toast('The host removed you from the game.', 6000); return this.leave(true); }
+      if (this.state === 'ended') { this.active = false; return; }
+      toast('Lost the connection to the game.'); this.leave(true);
+    };
     Net.send({ t: 'join', code });
   },
   guestNet(m, name, share) {
@@ -557,7 +573,7 @@ const MP = {
   reset() {
     clearTimeout(this.roundTimer); clearTimeout(this.readyTimer);
     Net.on = null; Net.onClose = null; Net.close();
-    Object.assign(this, { conns: new Set(), players: {}, libs: {}, answers: {}, curQ: null, round: 0, total: 0, state: 'idle', lobby: null, code: null, myId: null, from: {}, shown: {} });
+    Object.assign(this, { conns: new Set(), players: {}, libs: {}, answers: {}, curQ: null, round: 0, total: 0, state: 'idle', lobby: null, code: null, myId: null, from: {}, shown: {}, banned: new Set() });
     PlayerColors.clear();
   },
   leave(silent = false) {
@@ -582,6 +598,7 @@ Object.assign(Act, {
   mpRetry(el) { MP.coopRetry = el.checked; MP.lobbyChanged(); },
   mpExact(el) { MP.exact = el.checked; MP.lobbyChanged(); },
   mpStartAnyway() { MP.go(); },
+  mpKick(el) { const p = MP.players[el.dataset.id]; if (p && confirm(`Remove ${p.name} from the game?`)) MP.kick(p.id); },
   mpSettings() { SettingsUI.open('modal', MP.mode, { mp: true, onClose: () => { if (MP.host && MP.state === 'lobby') MP.lobbyChanged(); } }); },
   quit() { Act.mpLeave(); }
 });

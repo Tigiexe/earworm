@@ -538,3 +538,6 @@ a.mode.feature{display:flex}
 .board-row .st.load{background:transparent;animation:think 1s ease-in-out infinite}
 .res-songs-h{max-width:720px;margin:34px auto 6px;font-size:22px}
 .res-songs-h small{font-size:14px;font-weight:600}
+
+.player .kick{flex:none;padding:5px 9px;color:var(--mute)}
+.player .kick:hover{color:var(--hot);border-color:var(--hot)}
