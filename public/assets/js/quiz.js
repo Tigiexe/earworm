@@ -45,6 +45,23 @@ function songListHTML(hist) {
   }).join('')}</div>`;
 }
 
+/* multiplayer: little avatars on each answer option, showing who picked it */
+function showPicks(picks, q) {
+  if (!Array.isArray(picks) || !q?.choices) return;
+  for (const p of picks) {
+    const i = typeof p.given === 'string' ? q.choices.indexOf(p.given) : -1; if (i < 0) continue;
+    const b = $(`#qArea [data-i="${i}"]`); if (!b) continue;
+    let box = b.querySelector('.picks'); if (!box) { b.insertAdjacentHTML('beforeend', '<span class="picks"></span>'); box = b.querySelector('.picks'); }
+    if (!box.querySelector(`[data-n="${CSS.escape(p.name)}"]`)) box.insertAdjacentHTML('beforeend', avatar(p.name, 'mini').replace('<span ', `<span data-n="${esc(p.name)}" title="${esc(p.name)}" `));
+  }
+}
+/* the song from the last question, with play and like buttons (side panel) */
+function lastSongHTML(t) {
+  if (!t) return '';
+  return `<div class="gi-lastsong"><small class="mute">Last song</small><div class="ls">${t.album?.thumb ? `<img src="${esc(t.album.thumb)}" alt="">` : ''}
+    <div class="m"><b>${esc(t.name)}</b><small class="mute">${esc(t.artists?.[0]?.name || '')}</small></div>${playBtn(t)}${likeBtn(t)}</div></div>`;
+}
+
 /* ---------------- question UI ---------------- */
 const COVER_STEPS = 8;
 const PIXEL_BLOCKS = [5, 8, 12, 18, 26, 38, 60, 110, 0];
@@ -258,6 +275,7 @@ const QUI = {
     const b = e.target.closest('[data-q],[data-i]'); if (!b || b.disabled || ctx.waiting) return;
     if (b.dataset.i != null) { if (ctx.q.type === 'heardle') return this.heardleGuess(ctx, +b.dataset.i); return this.answer(ctx, +b.dataset.i); }
     const a = b.dataset.q;
+    if (ctx.turnUsed && ['submit', 'skip', 'giveup'].includes(a)) return;   // shared Heardle: one go per step
     if (a === 'submit') this.submitText(ctx);
     else if (a === 'giveup') ctx.q.type === 'heardle' ? this.heardleFail(ctx) : this.answer(ctx, '');
     else if (a === 'year') this.answer(ctx, +$('#yrIn').value);
@@ -393,7 +411,7 @@ const QUI = {
     return r;
   },
   heardleGuess(ctx, given) {
-    if (ctx.locked) return;
+    if (ctx.locked || ctx.turnUsed) return;
     const q = ctx.q;
     if (q.format === 'text' && this.needArtistMsg(ctx, given)) return;
     const res = this.grade(ctx, given);
@@ -411,7 +429,23 @@ const QUI = {
     this.heardleMark(ctx.stage, wrongGuess ? 'miss' : 'skip', wrongGuess ? '✗ ' + wrongGuess : 'Skipped');
     const inp = $('#qInput'); if (inp) { inp.value = ''; inp.focus(); }
     if (ctx.stage >= q.stages.length - 1) return this.heardleFail(ctx, wrongGuess);
+    const shared = ctx.opt.sharedHeardle;
+    if (shared) {   // multiplayer: everyone moves to the next step together, once all have had their go
+      ctx.turnUsed = true; $('#qArea')?.classList.add('turn-used');
+      $('#hdWait')?.remove(); $('#hdLog')?.insertAdjacentHTML('beforebegin', '<p class="hd-wait" id="hdWait">Waiting for the others to guess or skip…</p>');
+      shared(ctx.stage, wrongGuess || null);
+      return;
+    }
     ctx.stage++; this.heardleUI(ctx); this.playStage(ctx);
+  },
+  /* multiplayer Heardle: the host moved everyone on to this step */
+  heardleAdvance(stage) {
+    const ctx = this.ctx; if (!ctx || ctx.done || ctx.q.type !== 'heardle' || stage <= ctx.stage) return;
+    const q = ctx.q;
+    if (!ctx.turnUsed) this.heardleMark(ctx.stage, 'skip', 'No guess');
+    if (stage >= q.stages.length) return this.heardleFail(ctx, null);
+    ctx.stage = stage; ctx.turnUsed = false; $('#qArea')?.classList.remove('turn-used'); $('#hdWait')?.remove();
+    this.heardleUI(ctx); this.playStage(ctx);
   },
   heardleFail(ctx, last) { if (ctx.locked) return; ctx.locked = true; ctx.finish({ correct: false, factor: 0, points: 0, given: last || '—', extra: { stage: ctx.stage } }); },
   /* fill in one row of the attempts list */
@@ -453,7 +487,7 @@ const Reveal = {
     clearInterval(this.timer);
     const v = verdict(q, res);
     const ptsTxt = pts > 0 ? `+${pts}` : pts < 0 ? `${pts}` : '0';
-    $('#revealBox').innerHTML = `<div class="reveal ${v.cls}"><div class="rv-verdict"><span>${esc(v.text)}</span><span class="num">${ptsTxt}</span></div>
+    $('#revealBox').innerHTML = `<div class="reveal ${v.cls}">${last ? '<div class="last-banner">🏁 That was the last song</div>' : ''}<div class="rv-verdict"><span>${esc(v.text)}</span><span class="num">${ptsTxt}</span></div>
       ${revealBody(q)}${extraHTML}
       <div class="rv-actions">${onNext ? `<button class="btn primary" data-next="1">${esc(nextLabel || (last ? 'See results' : 'Next song'))}</button><span class="mute" id="autoNext"></span>` : `<span class="mute">${esc(waiting || '')}</span>`}</div></div>`;
     this.onNext = onNext || null;
@@ -461,10 +495,12 @@ const Reveal = {
     const nb = $('#revealBox [data-next]'); if (nb) nb.onclick = () => this.go();
     if (onNext) {
       document.addEventListener('keydown', this.onKey);
-      if (auto > 0 && !last) {
-        let n = auto; const lab = $('#autoNext'); lab.innerHTML = `Next in ${n}s <button class="linkbtn" id="holdNext">wait</button>`;
+      // after the last song the results open by themselves too, so it's clear the game is over
+      const secs = last ? 8 : auto, what = last ? 'Final scores in' : 'Next in';
+      if (secs > 0) {
+        let n = secs; const lab = $('#autoNext'); lab.innerHTML = `${what} ${n}s <button class="linkbtn" id="holdNext">wait</button>`;
         $('#holdNext').onclick = () => { clearInterval(this.timer); lab.textContent = ''; };
-        this.timer = setInterval(() => { n--; if (n <= 0) { clearInterval(this.timer); this.go(); } else { const s = lab.firstChild; if (s) s.textContent = `Next in ${n}s `; } }, 1000);
+        this.timer = setInterval(() => { n--; if (n <= 0) { clearInterval(this.timer); this.go(); } else { const s = lab.firstChild; if (s) s.textContent = `${what} ${n}s `; } }, 1000);
       }
       setTimeout(() => nb?.focus({ preventScroll: true }), 50);
     }
@@ -508,9 +544,10 @@ function infoHTML(info, live = null) {
   const pct = n => `${Math.round(+n || 0)}%`;
   return `<div class="gi">
     <div class="gi-mode"><span class="gi-ic">${esc(info.icon)}</span><div><b>${esc(info.name)}</b><small class="mute">${esc(info.summary)}</small></div></div>
-    ${info.coop ? `<p class="gi-coop">🤝 Co-op — the first answer counts for the whole team${info.coopRetry ? '; a wrong one only rules itself out' : ''}.</p>` : ''}
+    ${info.coop ? `<p class="gi-coop">🤝 Co-op — ${esc({ first: 'the first answer counts for the whole team', retry: 'the first right answer counts; wrong ones only rule themselves out', vote: 'team vote: the most popular answer counts' }[info.coopRule] || 'one shared answer and score')}.</p>` : ''}
     ${live ? `<div class="gi-live"><div><b class="num">${fmtN(live.correct)}/${fmtN(live.answered)}</b><span>right</span></div><div><b class="num">${fmtN(live.best)}</b><span>best streak</span></div></div>` : ''}
-    ${live?.last ? `<div class="gi-last"><small class="mute">Last song came from</small><br>${esc(live.last)}</div>` : ''}
+    ${live?.lastTrack ? lastSongHTML(live.lastTrack) : ''}
+    ${live?.last ? `<div class="gi-last"><small class="mute">It came from</small><br>${esc(live.last)}</div>` : ''}
     <h4>In the mix <small class="mute">${fmtN(info.songs)} songs</small></h4>
     ${(info.sources || []).slice(0, 8).map(s => `<div class="gi-src"><span class="l">${s.player ? `<i style="background:${playerColor(s.label)}"></i>` : ''}${esc(s.label)}</span><span class="bar"><i style="width:${Math.min(100, +s.pct || 0)}%;${s.player ? `background:${playerColor(s.label)}` : ''}"></i></span><b class="num">${pct(s.pct)}</b></div>`).join('')}
     ${(info.sources || []).length > 8 ? `<small class="mute">+${info.sources.length - 8} more</small>` : ''}

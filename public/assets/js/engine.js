@@ -147,11 +147,12 @@ const Engine = {
      opts.needPreview for multiplayer */
   setup(pool, opts = {}) {
     this.pool = pool; this.opts = opts; this.used = new Set(); this.bad = new Set(); this.lastArtists = [];
-    this.picked = {}; this.chosenGroup = null; this.exact = opts.exact ?? S.exactSplit;
+    this.picked = {}; this.chosenGroup = null; this.exact = opts.exact ?? S.exactSplit; this.groupOf = new Map();
     this.keys = new Map(pool.map(t => [t.id, trackKey(t)])); this.poolKeys = new Set(this.keys.values());
     const by = opts.groupBy || (t => t.src || []), groups = new Map();
     for (const t of pool) for (const g of (by(t)?.length ? by(t) : ['?'])) { if (!groups.has(g)) groups.set(g, []); groups.get(g).push(t); }
     this.groups = [...groups.entries()].map(([key, tracks]) => ({ key, tracks }));
+    this.planQuotas(opts.total ?? (S.rule === 'classic' ? S.rounds : 0));
     const want = Object.keys(TYPES).filter(k => S.types[k]);
     this.types = want.filter(k => feasible(k, pool));
     this.skipped = want.filter(k => !this.types.includes(k));
@@ -165,8 +166,26 @@ const Engine = {
   },
   key(t) { return this.keys.get(t.id) || trackKey(t); },
   avail(t) { return !this.used.has(this.key(t)) && !this.bad.has(t.id); },
+  /* exact split: how many of the game's songs each group gets (largest remainder, so 25/25/25/25 of 20 is 5/5/5/5) */
+  planQuotas(n) {
+    this.quota = null;
+    if (!this.exact || !(n > 0) || this.groups.length < 2) return;
+    const W = this.opts.weights, size = S.mixMode === 'size';
+    const w = this.groups.map(g => ({ key: g.key, w: W ? Math.max(0, W[g.key] || 0) : size ? g.tracks.length : 1 })), tot = w.reduce((a, x) => a + x.w, 0);
+    if (!tot) return;
+    const exact = w.map(x => ({ key: x.key, v: x.w / tot * n })), q = {};
+    for (const x of exact) q[x.key] = Math.floor(x.v);
+    let left = n - Object.values(q).reduce((a, b) => a + b, 0);
+    for (const x of shuffle(exact).sort((a, b) => (b.v % 1) - (a.v % 1))) { if (left <= 0) break; if (x.v > 0) { q[x.key]++; left--; } }
+    this.quota = q;
+  },
+  /* a picked song wasn't used after all (it wouldn't play): give its slot back */
+  release(t) {
+    const g = t && this.groupOf.get(t.id); if (g == null) return;
+    this.groupOf.delete(t.id); this.picked[g] = Math.max(0, (this.picked[g] || 0) - 1);
+  },
   take(t) {
-    if (this.chosenGroup != null) { this.picked[this.chosenGroup] = (this.picked[this.chosenGroup] || 0) + 1; this.chosenGroup = null; }
+    if (this.chosenGroup != null) { this.picked[this.chosenGroup] = (this.picked[this.chosenGroup] || 0) + 1; this.groupOf.set(t.id, this.chosenGroup); this.chosenGroup = null; }
     this.used.add(this.key(t)); this.lastArtists = [normArtist(t.artists[0]?.name), ...this.lastArtists].slice(0, 2); return t; },
   /* one random song. With weights (multiplayer shares) each group gets its share of the picks;
      in "even" mode every source (liked songs, a chart…) gets an equal chance; in "size" mode every song does */
@@ -178,7 +197,15 @@ const Engine = {
     const cands = this.groups.map(g => ({ key: g.key, w: weight(g), c: g.tracks.filter(ok) })).filter(x => x.c.length);
     if (!cands.length) return null;
     if (this.exact) {
-      // exact split: take from whichever group is furthest behind its share so far (ties at random)
+      // exact split: every group has a fixed number of slots for this game (e.g. 5/5/5/5 of 20), filled in random order;
+      // a group whose songs have run out simply gets no more
+      const open = this.quota ? cands.filter(x => (this.quota[x.key] || 0) - (this.picked[x.key] || 0) > 0) : [];
+      if (open.length) {
+        let r = Math.random() * open.reduce((a, x) => a + this.quota[x.key] - (this.picked[x.key] || 0), 0);
+        for (const x of open) { r -= this.quota[x.key] - (this.picked[x.key] || 0); if (r <= 0) { this.chosenGroup = x.key; return pick(x.c); } }
+        const x = open[open.length - 1]; this.chosenGroup = x.key; return pick(x.c);
+      }
+      // no fixed number of songs (Survival, Endless…) or every slot used: stay as close to the shares as possible
       const total = this.groups.reduce((a, g) => a + weight(g), 0) || 1, n = Object.values(this.picked).reduce((a, b) => a + b, 0) + 1;
       const behind = x => x.w / total * n - (this.picked[x.key] || 0);
       const best = shuffle(cands.filter(x => x.w > 0)).sort((a, b) => behind(b) - behind(a))[0] || pick(cands);
@@ -212,6 +239,7 @@ const Engine = {
     // only the song actually asked about counts: the original stays available, and "last artists" is the relative's
     this.used.delete(this.key(t));
     this.lastArtists[0] = normArtist(x.artists[0]?.name);
+    if (this.groupOf.has(t.id)) { this.groupOf.set(x.id, this.groupOf.get(t.id)); this.groupOf.delete(t.id); }   // the relative takes the original's slot
     return x;
   },
   async relative(t, pred) {
@@ -240,7 +268,7 @@ const Engine = {
   },
   /* remember what a shown question used, so the next games can avoid it */
   shown(q) { for (const t of [q.track, ...(q.pair || []), ...(q.items || [])]) Recent.add(t); Recent.save(); },
-  markBad(t) { if (t) { this.bad.add(t.id); Player.markBroken(t); } },
+  markBad(t) { if (t) { this.bad.add(t.id); Player.markBroken(t); this.release(t); } },
   /* builds questions until one works; a song that can't be played is skipped for the rest of the game */
   async nextPrepared() {
     let offline = 0;
@@ -253,7 +281,7 @@ const Engine = {
         let ok;
         try { ok = await Player.prepare(q.track, { needPreview: this.opts.needPreview }); }
         catch (e) { if (++offline >= 3) throw e; await sleep(800); continue; }
-        if (!ok) { this.bad.add(q.track.id); continue; }
+        if (!ok) { this.bad.add(q.track.id); this.release(q.track); continue; }
       }
       q.sc = scoringSnapshot();
       return q;
@@ -373,4 +401,5 @@ async function makeQ(type) {
   }
   return q;
 }
-const limitFor = (q, mp) => q.type === 'heardle' ? (mp ? 60 : 0) : S.timeLimit;
+/* time per question; multiplayer Heardle gets enough for every step (clip + ~8 s to guess each) */
+const limitFor = (q, mp) => q.type === 'heardle' ? (mp ? Math.min(180, Math.round(q.stages.reduce((a, s) => a + s + 8, 0)) + 5) : 0) : S.timeLimit;

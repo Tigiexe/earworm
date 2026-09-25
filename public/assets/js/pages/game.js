@@ -73,6 +73,7 @@ const Game = {
     st.hist.push({ q, res, pts });
     floatPts(pts); this.hud();
     const t = q.track;
+    st.lastTrack = t || null;
     st.last = !t ? '' : t.similar ? `✨ a similar song (via ${t.similar.orig ? Lib.sourceLabel(t.similar.orig.src?.[0] || '') : 'your songs'})` : (t.src || []).map(k => Lib.sourceLabel(k)).join(' & ');
     this.side();
     QUI.markReveal(res);
@@ -81,7 +82,7 @@ const Game = {
   },
   side() {
     const st = this.st, b = $('#mpBoard'); if (!st || !b) return;
-    b.innerHTML = infoHTML(this.info, { correct: st.correct, answered: st.hist.length, best: st.best, last: st.last });
+    b.innerHTML = infoHTML(this.info, { correct: st.correct, answered: st.hist.length, best: st.best, last: st.last, lastTrack: st.lastTrack });
   },
   hud() {
     const st = this.st; if (!st) return;
