@@ -307,12 +307,28 @@ const QUI = {
     if (ctx.q.type === 'heardle') return this.heardleGuess(ctx, v);
     this.answer(ctx, v);
   },
+  /* the hint is worked out once (which options go, which year range), so a co-op team can all see the same one */
   useHint(ctx, btn) {
-    if (ctx.hint || ctx.locked) return; ctx.hint = true; btn.disabled = true;
+    if (ctx.hint || ctx.locked) return;
+    const q = ctx.q, h = { format: q.format };
+    if (q.format === 'choice') h.gone = shuffle(q.choices.map((_, i) => i).filter(i => i !== q.answerIndex)).slice(0, Math.floor((q.choices.length - 1) / 2));
+    else if (q.format === 'slider') { h.lo = Math.max(q.min, q.year - rand(6)); h.hi = Math.min(q.max, h.lo + 6); }
+    this.applyHint(ctx, h);
+    ctx.opt.sharedHint?.(h);
+  },
+  /* show a hint (your own, or a teammate's in co-op); counts once: points drop by 25% for this question */
+  applyHint(ctx, h, from = '') {
+    if (!ctx || ctx.hint || ctx.done || !h || h.format !== ctx.q.format) return;
     const q = ctx.q;
-    if (q.format === 'choice') { shuffle(q.choices.map((_, i) => i).filter(i => i !== q.answerIndex)).slice(0, Math.floor((q.choices.length - 1) / 2)).forEach(i => $(`#qArea [data-i="${i}"]`)?.classList.add('gone')); }
-    else if (q.format === 'text') { const h = $('#hintTxt'); h.textContent = maskAnswer(q.answer); /* only the masked answer, never the artist */ h.classList.remove('hidden'); }
-    else if (q.format === 'slider') { const lo = Math.max(q.min, q.year - rand(6)), hi = Math.min(q.max, lo + 6); const inp = $('#yrIn'); inp.min = lo; inp.max = hi; inp.value = Math.round((lo + hi) / 2); $('#yrOut').textContent = inp.value; $('#yrMin').textContent = lo; $('#yrMax').textContent = hi; }
+    ctx.hint = true; const btn = $('#qArea [data-q="hint"]'); if (btn) btn.disabled = true;
+    if (q.format === 'choice') (Array.isArray(h.gone) ? h.gone : []).filter(i => Number.isInteger(i) && i !== q.answerIndex).forEach(i => $(`#qArea [data-i="${i}"]`)?.classList.add('gone'));
+    else if (q.format === 'text') { const el = $('#hintTxt'); if (el) { el.textContent = maskAnswer(q.answer); el.classList.remove('hidden'); } }   // only the masked answer, never the artist
+    else if (q.format === 'slider') {
+      const lo = clamp(Math.round(+h.lo) || q.min, q.min, q.max), hi = clamp(Math.round(+h.hi) || q.max, lo, q.max);
+      const inp = $('#yrIn'); if (inp) { inp.min = lo; inp.max = hi; inp.value = Math.round((lo + hi) / 2); $('#yrOut').textContent = inp.value; $('#yrMin').textContent = lo; $('#yrMax').textContent = hi; }
+    }
+    if (from) $('#qTools')?.insertAdjacentHTML('beforeend', `<span class="hint-by">${avatar(from, 'mini')} ${esc(from)} used a hint for the team</span>`);
+    const pts = $('#qPts'); if (pts && ctx.t0 != null) pts.textContent = '+' + this.potential(ctx) + ' pts';
   },
   /* returns {ok, needArtist} for typed answers */
   checkText(ctx, given) {

@@ -576,3 +576,5 @@ body.drawer-on{overflow:hidden}
 .gi-lastsong .lbtn{padding:5px 9px;font-size:13px}
 .hd-wait{text-align:center;color:var(--mute);margin:12px 0 0;animation:think 1.4s ease-in-out infinite}
 .turn-used .text-ans .field,.turn-used .choices{opacity:.5;pointer-events:none}
+
+.hint-by{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--acc);animation:rise .3s ease-out}

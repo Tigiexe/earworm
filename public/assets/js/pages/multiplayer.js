@@ -162,6 +162,8 @@ const MP = {
         }
       }
       this.lobbyChanged();
+    } else if (d.t === 'hint') {
+      if (d.qid === this.curQ?.id) this.onHint(id, d.round, d.h);
     } else if (d.t === 'turn') {
       if (d.round === this.round && d.qid === this.curQ?.id && Number.isInteger(d.stage)) this.onTurn(id, d.stage, typeof d.given === 'string' ? d.given.slice(0, 80) : null);
     } else if (d.t === 'audio') {
@@ -263,7 +265,7 @@ const MP = {
     if (!this.active || !this.host) return;
     if (!q) { toast('Ran out of playable songs.'); return this.hostEnd(); }
     if (!reroll) this.round++;
-    this.answers = {}; this.curQ = q; this.state = 'question'; this.started = false; this.ready = new Set();
+    this.answers = {}; this.curQ = q; this.state = 'question'; this.started = false; this.ready = new Set(); this.hintUsed = false;
     // everyone hears the same thing: full songs only when every player has Spotify Premium working, otherwise the 30 s preview
     q.previewOnly = !this.fullSongs || !Object.values(this.players).filter(p => p.connected).every(p => p.id === 'host' ? Player.mode() === 'sdk' : p.sdk);
     for (const p of Object.values(this.players)) p.audio = '';
@@ -318,6 +320,17 @@ const MP = {
     this.playLocal(this.curQ, this.curLimit, this.round, pause);
     if (this.curQ.type === 'heardle') { this.hdStage = 0; this.hdTurns = new Set(); this.hdArm(pause); }
   },
+  /* co-op: the first hint of a question goes to everyone (the host checks it and passes it on) */
+  onHint(pid, round, h) {
+    if (!this.coop || round !== this.round || this.state !== 'question' || this.hintUsed || !h || typeof h !== 'object') return;
+    const q = this.curQ, clean = { format: q.format };
+    if (q.format === 'choice') clean.gone = (Array.isArray(h.gone) ? h.gone : []).filter(i => Number.isInteger(i) && i >= 0 && i < q.choices.length && i !== q.answerIndex).slice(0, q.choices.length - 1);
+    else if (q.format === 'slider') { clean.lo = +h.lo; clean.hi = +h.hi; }
+    this.hintUsed = true;
+    const name = this.players[pid]?.name || '';
+    this.broadcast({ t: 'hint', round, h: clean, name });
+    if (pid !== 'host') QUI.applyHint(QUI.ctx, clean, name);
+  },
   /* ---- Heardle together: everyone hears the same step; the next one starts once all have guessed or skipped ---- */
   hdArm(extra = 0) {
     clearTimeout(this.hdTimer);
@@ -348,7 +361,9 @@ const MP = {
     // tell the host when this player's audio didn't start (shown on the scoreboard)
     const onAudio = state => { if (this.host) this.onAudio('host', state); else this.up({ t: 'audio', round, state }); };
     const sharedHeardle = q.type === 'heardle' ? (stage, given) => { if (this.host) this.onTurn('host', stage, given); else this.up({ t: 'turn', round, qid: q.id, stage, given }); } : null;
-    const res = await QUI.run(q, { limit, names: this.names, roundLabel: round, pause, onAudio, sharedHeardle, reroll: this.host && (this.rerolls || 0) < 3, onShown: this.host ? x => Engine.shown(x) : null });
+    // co-op: a hint anyone uses is shown to the whole team
+    const sharedHint = this.coop ? h => { if (this.host) this.onHint('host', round, h); else this.up({ t: 'hint', round, qid: q.id, h }); } : null;
+    const res = await QUI.run(q, { limit, names: this.names, roundLabel: round, pause, onAudio, sharedHeardle, sharedHint, reroll: this.host && (this.rerolls || 0) < 3, onShown: this.host ? x => Engine.shown(x) : null });
     if (!this.active || round !== this.round || q !== this.curQ) return;
     if (res.unplayable && this.host) { this.rerolls = (this.rerolls || 0) + 1; Engine.markBad(q.track); toast('That song wouldn’t play — picking another.', 2500); return this.hostNext(true); }
     this.rerolls = 0;
@@ -498,6 +513,7 @@ const MP = {
         this.state = 'playing'; this.myHist = []; this.enterGame(); $('#qArea').innerHTML = '<div class="loading">Get ready…</div>'; break;
       case 'tried': this.onTried(d); break;
       case 'stage': if (d.round === this.round) QUI.heardleAdvance(+d.stage); break;
+      case 'hint': if (d.round === this.round && d.name !== this.myName) QUI.applyHint(QUI.ctx, d.h, String(d.name || 'A teammate')); break;
       case 'q':
         if (!d.q || typeof d.q !== 'object') return;
         if (!$('#scr-game').classList.contains('active')) this.enterGame();
