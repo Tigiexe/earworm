@@ -162,6 +162,8 @@ const MP = {
         }
       }
       this.lobbyChanged();
+    } else if (d.t === 'hdAct') {
+      if (d.qid === this.curQ?.id && Number.isInteger(d.stage)) this.onTeamHeardle(id, d.round, { stage: d.stage, skip: d.skip === true, given: typeof d.given === 'string' ? d.given : '' });
     } else if (d.t === 'hint') {
       if (d.qid === this.curQ?.id) this.onHint(id, d.round, d.h);
     } else if (d.t === 'turn') {
@@ -318,7 +320,20 @@ const MP = {
     clearTimeout(this.roundTimer); this.roundTimer = setTimeout(() => this.hostReveal(), (this.curLimit + pause + 4) * 1000);
     this.renderBoard(this.pub());
     this.playLocal(this.curQ, this.curLimit, this.round, pause);
-    if (this.curQ.type === 'heardle') { this.hdStage = 0; this.hdTurns = new Set(); this.hdArm(pause); }
+    if (this.curQ.type === 'heardle') {
+      if (this.coop) this.teamHd = { stage: 0, log: [] };   // co-op: one shared Heardle for the team
+      else { this.hdStage = 0; this.hdTurns = new Set(); this.hdArm(pause); }
+    }
+  },
+  /* co-op Heardle: a wrong guess or skip from anyone uses up the team's step; out of steps = nobody got it */
+  onTeamHeardle(pid, round, d) {
+    const hd = this.teamHd, q = this.curQ;
+    if (!this.coop || !hd || round !== this.round || this.state !== 'question' || q?.type !== 'heardle' || !d || d.stage !== hd.stage || !this.players[pid]) return;
+    hd.log.push({ stage: hd.stage, kind: d.skip ? 'skip' : 'miss', text: d.skip ? '' : String(d.given || '').slice(0, 80), name: this.players[pid].name });
+    hd.stage++;
+    const msg = { t: 'hdState', round, stage: hd.stage, log: hd.log };
+    this.broadcast(msg); QUI.heardleSync(hd.stage, hd.log);
+    if (hd.stage >= q.stages.length) this.hostReveal(null);
   },
   /* co-op: the first hint of a question goes to everyone (the host checks it and passes it on) */
   onHint(pid, round, h) {
@@ -360,10 +375,11 @@ const MP = {
     Reveal.clear();
     // tell the host when this player's audio didn't start (shown on the scoreboard)
     const onAudio = state => { if (this.host) this.onAudio('host', state); else this.up({ t: 'audio', round, state }); };
-    const sharedHeardle = q.type === 'heardle' ? (stage, given) => { if (this.host) this.onTurn('host', stage, given); else this.up({ t: 'turn', round, qid: q.id, stage, given }); } : null;
+    const sharedHeardle = q.type === 'heardle' && !this.coop ? (stage, given) => { if (this.host) this.onTurn('host', stage, given); else this.up({ t: 'turn', round, qid: q.id, stage, given }); } : null;
+    const teamHeardle = q.type === 'heardle' && this.coop ? a => { if (this.host) this.onTeamHeardle('host', round, a); else this.up({ t: 'hdAct', round, qid: q.id, ...a }); } : null;
     // co-op: a hint anyone uses is shown to the whole team
     const sharedHint = this.coop ? h => { if (this.host) this.onHint('host', round, h); else this.up({ t: 'hint', round, qid: q.id, h }); } : null;
-    const res = await QUI.run(q, { limit, names: this.names, roundLabel: round, pause, onAudio, sharedHeardle, sharedHint, reroll: this.host && (this.rerolls || 0) < 3, onShown: this.host ? x => Engine.shown(x) : null });
+    const res = await QUI.run(q, { limit, names: this.names, roundLabel: round, pause, onAudio, sharedHeardle, teamHeardle, sharedHint, reroll: this.host && (this.rerolls || 0) < 3, onShown: this.host ? x => Engine.shown(x) : null });
     if (!this.active || round !== this.round || q !== this.curQ) return;
     if (res.unplayable && this.host) { this.rerolls = (this.rerolls || 0) + 1; Engine.markBad(q.track); toast('That song wouldn’t play — picking another.', 2500); return this.hostNext(true); }
     this.rerolls = 0;
@@ -383,7 +399,7 @@ const MP = {
     const e = r.extra && typeof r.extra === 'object' ? r.extra : {};
     this.answers[pid] = { correct: r.correct === true, factor: num(r.factor, 1), points: num(r.points, S.maxPts * 1.5), given: String(r.given ?? '').slice(0, 80), elapsed: num(r.elapsed, 600),
       extra: { diff: Number.isInteger(e.diff) ? e.diff : undefined, stage: Number.isInteger(e.stage) ? e.stage : undefined, reveal: Number.isInteger(e.reveal) ? e.reveal : undefined } };
-    if (this.coop && this.coopRule !== 'vote') {
+    if (this.coop && (this.coopRule !== 'vote' || this.curQ?.type === 'heardle')) {   // co-op Heardle is one shared game whatever the rule
       const a = this.answers[pid], said = a.given && a.given !== '—';
       // the first real answer is the team's — unless wrong answers only rule themselves out
       if (said && (a.correct || a.factor > 0 || this.coopRule !== 'retry')) return this.hostReveal(pid);
@@ -447,7 +463,8 @@ const MP = {
     } else if (a && a.factor > 0) { pts = clamp(Math.round(a.points || 0), 0, S.maxPts); team.streak = 0; }
     else { team.streak = 0; if (a) pts = -S.wrongPenalty; }
     const before = team.score; team.score = Math.max(0, team.score + pts);
-    const tries = Object.entries(this.answers).filter(([id, r]) => id !== by && r.given && r.given !== '—').map(([id, r]) => ({ name: this.players[id]?.name || '?', given: r.given }));
+    let tries = Object.entries(this.answers).filter(([id, r]) => id !== by && r.given && r.given !== '—').map(([id, r]) => ({ name: this.players[id]?.name || '?', given: r.given }));
+    if (this.curQ?.type === 'heardle' && this.teamHd) tries = this.teamHd.log.filter(e => e.kind === 'miss').map(e => ({ name: e.name, given: e.text }));
     for (const o of this.curQ?.track?.owners || []) this.from[o] = (this.from[o] || 0) + 1;
     const res = a ? { ...a, pts: team.score - before, by, byName: this.players[by]?.name } : { timeout: true, given: null, correct: false, factor: 0, pts: team.score - before };
     const msg = { t: 'reveal', coop: true, round: this.round, team: res, teamScore: { ...team }, tries: votes ? [] : tries, votes, picks: this.picks(), players: this.pub(), last: this.round >= this.total };
@@ -513,6 +530,7 @@ const MP = {
         this.state = 'playing'; this.myHist = []; this.enterGame(); $('#qArea').innerHTML = '<div class="loading">Get ready…</div>'; break;
       case 'tried': this.onTried(d); break;
       case 'stage': if (d.round === this.round) QUI.heardleAdvance(+d.stage); break;
+      case 'hdState': if (d.round === this.round) QUI.heardleSync(+d.stage, d.log); break;
       case 'hint': if (d.round === this.round && d.name !== this.myName) QUI.applyHint(QUI.ctx, d.h, String(d.name || 'A teammate')); break;
       case 'q':
         if (!d.q || typeof d.q !== 'object') return;

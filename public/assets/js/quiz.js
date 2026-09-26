@@ -277,7 +277,7 @@ const QUI = {
     const a = b.dataset.q;
     if (ctx.turnUsed && ['submit', 'skip', 'giveup'].includes(a)) return;   // shared Heardle: one go per step
     if (a === 'submit') this.submitText(ctx);
-    else if (a === 'giveup') ctx.q.type === 'heardle' ? this.heardleFail(ctx) : this.answer(ctx, '');
+    else if (a === 'giveup') ctx.q.type !== 'heardle' ? this.answer(ctx, '') : ctx.opt.teamHeardle ? this.heardleNext(ctx, null) : this.heardleFail(ctx);
     else if (a === 'year') this.answer(ctx, +$('#yrIn').value);
     else if (a === 'hint') this.useHint(ctx, b);
     else if (a === 'replay') this.replay(ctx);
@@ -427,10 +427,16 @@ const QUI = {
     return r;
   },
   heardleGuess(ctx, given) {
-    if (ctx.locked || ctx.turnUsed) return;
+    if (ctx.locked || ctx.turnUsed || ctx.pending) return;
     const q = ctx.q;
     if (q.format === 'text' && this.needArtistMsg(ctx, given)) return;
     const res = this.grade(ctx, given);
+    // co-op: the team plays one Heardle — a wrong guess uses up the team's step, the host moves everyone on
+    if (ctx.opt.teamHeardle && !res.correct) {
+      ctx.pending = true; $('#qArea')?.classList.add('turn-used');
+      ctx.opt.teamHeardle({ stage: ctx.stage, given: q.format === 'choice' ? q.choices[given] : String(given) });
+      return;
+    }
     if (res.correct) {
       ctx.locked = true; if (q.format === 'choice') $(`#qArea [data-i="${given}"]`)?.classList.add('picked');
       this.heardleMark(ctx.stage, 'hit', '✓ ' + (q.format === 'choice' ? q.choices[given] : given));
@@ -441,6 +447,12 @@ const QUI = {
   },
   heardleNext(ctx, wrongGuess) {
     if (ctx.locked) return;
+    if (ctx.opt.teamHeardle) {   // co-op skip: the whole team moves to the next step
+      if (ctx.pending) return;
+      ctx.pending = true; $('#qArea')?.classList.add('turn-used');
+      ctx.opt.teamHeardle({ stage: ctx.stage, skip: true });
+      return;
+    }
     const q = ctx.q;
     this.heardleMark(ctx.stage, wrongGuess ? 'miss' : 'skip', wrongGuess ? '✗ ' + wrongGuess : 'Skipped');
     const inp = $('#qInput'); if (inp) { inp.value = ''; inp.focus(); }
@@ -453,6 +465,20 @@ const QUI = {
       return;
     }
     ctx.stage++; this.heardleUI(ctx); this.playStage(ctx);
+  },
+  /* co-op Heardle: the team's shared attempts so far, and the step it's on now */
+  heardleSync(stage, log) {
+    const ctx = this.ctx; if (!ctx || ctx.done || ctx.q.type !== 'heardle') return;
+    const q = ctx.q;
+    for (const e of Array.isArray(log) ? log : []) {
+      if (!Number.isInteger(e.stage)) continue;
+      const who = e.name ? `${e.name}: ` : '';
+      this.heardleMark(e.stage, e.kind === 'skip' ? 'skip' : 'miss', e.kind === 'skip' ? `Skipped${e.name ? ' by ' + e.name : ''}` : `✗ ${who}${e.text || ''}`);
+      if (e.kind !== 'skip' && q.format === 'choice') { const b = $(`#qArea [data-i="${q.choices.indexOf(e.text)}"]`); if (b) { b.classList.add('wrong'); b.disabled = true; choiceMark(b, false); } }
+    }
+    ctx.pending = false; $('#qArea')?.classList.remove('turn-used');
+    const inp = $('#qInput'); if (inp) { inp.value = ''; inp.focus(); }
+    if (stage > ctx.stage && stage < q.stages.length) { ctx.stage = stage; this.heardleUI(ctx); this.playStage(ctx); }
   },
   /* multiplayer Heardle: the host moved everyone on to this step */
   heardleAdvance(stage) {
